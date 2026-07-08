@@ -1,0 +1,2 @@
+# Geometric_Canaries
+LLM-assisted formal verification pipelines are vulnerable to a critical failure mode: adversarially perturbed theorem statements can steer models toward plausible-but-invalid proofs, with no warning until the proof checker fails. This project applies geometric chain-of-thought analysis to proof generation, using two metrics, Average Angle Error and Number of Mistakes, to detect reasoning instability mid-generation, before the checker is invoked. Both metrics are already validated as adversarial-sensitive in general reasoning 
