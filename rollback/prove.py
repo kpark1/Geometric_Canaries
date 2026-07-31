@@ -5,8 +5,8 @@ import torch
 import torch.nn.functional as F
 from transformers import DynamicCache
 
-from prompting import encode_prompt
-from segment_detection import (
+from prompt import encode_prompt
+from segment import (
     LEXICAL_SMELLS,
     MIN_SEGMENT_TOKENS,
     find_boundary,

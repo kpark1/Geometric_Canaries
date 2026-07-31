@@ -34,17 +34,17 @@ from functools import partial
 
 import pandas as pd
 
-from eval import proxy_outcome, run_eval
-from model_runtime import load_model_runtime
+from evaluate import proxy_outcome, run_eval
+from model import load_model_runtime
 from prove import prove as run_proof
 from rollback_rust import LEAN_MODELS, build_prompt
-from visualization import plot_timeline
+from draw import plot_timeline
 
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
 )
-DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
+# DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 
 """## Dataset — 3 Aeneas-style minimal pairs
@@ -137,11 +137,13 @@ def main():
                         help="generation limit per attempt (default: 64)")
     parser.add_argument("--plot", action="store_true",
                         help="show plots after generation")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="use the small model for a smoke test")
     args = parser.parse_args()
 
     model, tokenizer, capture_layer = load_model_runtime(
         PROJECT_CACHE,
-        dry_run=DRY_RUN,
+        dry_run=args.dry_run,
         device_request=DEVICE_REQUEST,
     )
     prove = partial(
