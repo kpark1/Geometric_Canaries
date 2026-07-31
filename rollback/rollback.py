@@ -29,84 +29,23 @@ apples-to-apples: same sampler, same seeds, same detector.
 """
 
 # --- Setup -------------------------------------------------------------
-# Safe default: use the small CPU-capable model. Set
-# GEOMETRIC_CANARIES_DRY_RUN=0 only in a GPU environment with the optional
-# `gpu` dependency group installed.
 import os
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers import BitsAndBytesConfig
+from functools import partial
+
+import pandas as pd
+
+from eval import proxy_outcome, run_eval
+from model_runtime import load_model_runtime
+from prove import prove as run_proof
 from rollback_rust import LEAN_MODELS, build_prompt
-from rollback_utils import encode_prompt
+from visualization import plot_timeline
 
-PROJECT_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache")
-os.environ.setdefault("HF_HOME", os.path.join(PROJECT_CACHE, "huggingface"))
-os.environ.setdefault("MPLCONFIGDIR", os.path.join(PROJECT_CACHE, "matplotlib"))
 
+PROJECT_CACHE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
+)
 DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
-DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto").lower()
-if DEVICE_REQUEST not in {"auto", "cpu", "cuda"}:
-    raise ValueError(
-        "GEOMETRIC_CANARIES_DEVICE must be one of: auto, cpu, cuda"
-    )
-
-
-CUDA_AVAILABLE = torch.cuda.is_available()
-if DEVICE_REQUEST == "cuda" and not CUDA_AVAILABLE:
-    raise RuntimeError(
-        "CUDA was requested but is unavailable. Check nvidia-smi and the "
-        "installed PyTorch CUDA build."
-    )
-DEVICE_MAP = (
-    "cuda"
-    if DEVICE_REQUEST == "cuda"
-    else ("auto" if DEVICE_REQUEST == "auto" and CUDA_AVAILABLE else "cpu")
-)
-USE_CUDA = DEVICE_MAP != "cpu"
-MODEL_DTYPE = (
-    torch.bfloat16
-    if USE_CUDA and torch.cuda.is_bf16_supported()
-    else (torch.float16 if USE_CUDA else torch.float32)
-)
-print(f"CUDA: {CUDA_AVAILABLE}; device: {DEVICE_MAP}; dtype: {MODEL_DTYPE}")
-if CUDA_AVAILABLE:
-    p = torch.cuda.get_device_properties(0)
-    print(f"GPU: {p.name}, {p.total_memory/1e9:.1f} GB")
-elif not DRY_RUN:
-    print("!! no GPU — set DRY_RUN = True or switch runtime")
-
-# --- Model -------------------------------------------------------------
-
-# small testing model (0.5 B parameters) w/ 32 bit
-# for quick pipeline testing
-if DRY_RUN:
-    MODEL_ID = "Qwen/Qwen2.5-0.5B-Instruct"
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID, dtype=MODEL_DTYPE, device_map=DEVICE_MAP
-    )
-# larger model (7 B) w/ 4 (16) bit quantization for storage (calculation) in GPU
-# for precision
-else:
-
-    MODEL_ID = "deepseek-ai/DeepSeek-Prover-V2-7B"
-    bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=MODEL_DTYPE,
-                             bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True)
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, quantization_config=bnb,
-                                                 device_map=DEVICE_MAP,
-                                                 dtype=MODEL_DTYPE)
-model.eval()
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-
-# Use the end-of-sequence token for padding if no padding token is defined
-if tokenizer.pad_token_id is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-# Use a layer around two-thirds (i.e. 0.65) depth to contain developed
-# reasoning information before it is converted into the final output
-N_LAYERS = model.config.num_hidden_layers
-CAPTURE_LAYER = int(N_LAYERS * 0.65)      # residual stream, ~2/3 depth
-
-print(f"{MODEL_ID}: {N_LAYERS} layers, capturing layer {CAPTURE_LAYER}")
+DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 
 """## Dataset — 3 Aeneas-style minimal pairs
 
@@ -147,76 +86,6 @@ segment closes, it is scored against the running statistics of the segments befo
 `score = 0.5·z_ent + 0.5·z_drift + 1.5·smell`, flag when `score > thresh`.
 """
 
-import re, time
-import numpy as np
-import torch
-import torch.nn.functional as F
-from transformers import DynamicCache
-
-# Handle both standard newlines and byte-level BPE newlines ('Ċ')
-BOUNDARY_PAT = re.compile(
-    r"[\nĊ]\s*[\nĊ]"
-    r"|[\nĊ](?=Step \d)"
-    r"|[\nĊ](?=\d+[\.)]\s)"
-    r"|[\nĊ](?=```)"
-    r"|[\nĊ](?=(?:First|Second|Next|Then|Now|Finally|Therefore|Thus)[,\s])"
-    r"|[\nĊ](?=\s*<;>)",
-    flags=re.IGNORECASE,
-)
-# prevents extremely short segments
-MIN_SEG_TOKENS = 8
-
-# define smells: sorry, admit, ...
-LEXICAL_SMELLS = re.compile(
-    r"\bsorry\b|\badmit\b|native_decide|\bobviously\b|\btrivially\b"
-    r"|clearly\s+true|it is easy to see", re.IGNORECASE)
-
-# After every token, the code asks whether a segment boundary has appeared
-def find_boundary(text, from_char):
-    m = BOUNDARY_PAT.search(text, from_char)
-    if m:
-        return m.end()
-
-    nl1 = text.find('\n', from_char + 100)
-    nl2 = text.find('Ċ', from_char + 100)
-    nls = [n for n in (nl1, nl2) if n != -1]
-    return min(nls) + 1 if nls else None
-
-def cosine_dist(a, b):
-    na, nb = np.linalg.norm(a), np.linalg.norm(b)
-    return 0.0 if na == 0 or nb == 0 else 1.0 - float(a @ b) / (na * nb)
-
-"""
-history contains the previously closed segments that the system has kept
-e.g. for segment 4 -> history from segment 1-3
-formula for score: 0.5 zent ​+ 0.5zdrift ​+ 1.5(smell)
-
-measure:
-z_ent: Model’s next-token probabilities -> Was the model unusually uncertain while writing this segment?
-  -> def: z_ent is (current segment entropy - previous mean entropy) / preious entropy variation
-z_drift: Model’s hidden-state geometry -> Is the current segment farther from the earlier reasoning than segments normally are?
-  ->
-smell: Actual generated words -> Did the model use a known suspicious shortcut phrase or invalid Lean construct?
-"""
-
-def score_segment(seg, history, warmup=0):
-    smell_score = 1.5 if seg["smell"] else 0.0
-    if len(history) <= warmup:
-        return smell_score + 0.1 # Allow smells to trigger even during warmup
-
-    ents = np.array([h["mean_entropy"] for h in history])
-    z_ent = (seg["mean_entropy"] - ents.mean()) / max(float(ents.std()), 0.25)
-    cents = [h["centroid"] for h in history if h["centroid"] is not None]
-    if seg["centroid"] is not None and cents:
-        run = np.mean(cents, axis=0)
-        drifts = np.array([cosine_dist(c, run) for c in cents])
-        d = cosine_dist(seg["centroid"], run)
-        z_drift = ((d - drifts.mean()) / max(float(drifts.std()), 0.05)
-                   if len(drifts) > 1 else 0.0)
-    else:
-        z_drift = 0.0
-    return 0.5 * z_ent + 0.5 * z_drift + smell_score
-
 """## The `prove()` loop — checkpoint = KV-cache length
 
 One manual decode loop drives all three conditions:
@@ -235,249 +104,6 @@ hints), which is the honest compute cost; abandoned branches are kept as counter
 data for the geometry analysis.
 """
 
-HINT = ("\nWait -- let me re-check the last step carefully before continuing. "
-        "I should verify each claim against the definitions.\n")
-
-
-def _sample(logits, temperature, top_p, gen):
-    # selects the token with the highest logit if temperature is zero or negative
-    if temperature <= 0:
-        return int(logits.argmax())
-
-    # convert logits into probabilities
-    probs = F.softmax(logits / temperature, dim=-1)
-    sp, si = probs.sort(descending=True)
-    # keep the top-p candidate set
-    keep = (sp.cumsum(-1) - sp) <= top_p
-    keep[0] = True
-    sp = sp * keep
-    idx = torch.multinomial(sp / sp.sum(), 1, generator=gen)
-    return int(si[idx])
-
-
-@torch.no_grad()
-def prove(prompt, mode="rollback", max_new_tokens=512, max_rollbacks=3,
-          thresh=1.8, temperature=1.0, top_p=0.95, seed=0, inject_hint=True,
-          verbose=False):
-    """One streaming generate-detect-rollback run.
-
-    mode:
-      'plain'    -- generate once, detect nothing
-      'rollback' -- on a flagged segment, crop the KV cache back to the
-                    checkpoint at the segment start and resample from there
-      'restart'  -- on a flagged segment, throw everything away and resample
-                    from the prompt (matched-intervention baseline: same
-                    detector, no checkpointing)
-
-    A *checkpoint* is just a sequence length: the KV cache up to the start of
-    the current segment.  Rollback = cache.crop(ck) -- the prompt and the good
-    prefix are never recomputed.
-
-    Returns dict with text, per-token signals, segments, events, forward-pass
-    and wall-time accounting, and abandoned branches (counterfactual data).
-
-    procedures summary:
-    Model generates tokens
-    → code detects a boundary
-    → segment is “closed”
-    → its statistics are calculated
-    → it is scored
-    → accepted or rolled back
-    → next segment begins
-    """
-    t0 = time.time()
-    gen = torch.Generator(device="cpu").manual_seed(seed)
-    input_ids = encode_prompt(prompt, tokenizer).to(model.device)
-    prompt_len = input_ids.shape[1]
-
-    # stores those key/value vectors as new tokens are generated (dynamic)
-    cache = DynamicCache()
-    out = model(input_ids=input_ids, past_key_values=cache, use_cache=True,
-                output_hidden_states=True)
-    logits = out.logits[0, -1].float()
-    n_forward = prompt_len          # prefill counts once; rollback never repeats it
-
-    """
-    prefill: counts how many times the whole original prompt has been processed
-    generation: one new token per model call
-      in rollback mode, it remains 1, because cropping preserves the cached prompt
-      in restart mode, the cache is thrown away and the prompt is processed again:
-    """
-    n_prefills = 1
-
-    # live state (generation-relative)
-    ids, text = [], ""
-    entropy, logprob, hidden = [], [], []
-
-    # mark where the current unfinished segment begins in ids (seg_start_tok) and text (seg_start_char)
-    seg_start_tok, seg_start_char = 0, 0
-
-    # where to resume searching for a future boundary
-    probe_char = 0                  # search cursor: skips rejected (too-short) boundaries
-    history, segments, events, abandoned = [], [], [], []
-    rollbacks = 0
-
-    # decides that the current reasoning step has ended, so it packages and scores it
-    def close_segment(end_tok, end_char):
-        sl = slice(seg_start_tok, end_tok)
-        h = np.stack(hidden[sl]) if hidden[sl] else None
-        seg = {
-            "idx": len(segments),
-            "tok_start": seg_start_tok, "tok_end": end_tok,
-            "text": text[seg_start_char:end_char],
-            "mean_entropy": float(np.nanmean(entropy[sl])),
-            "min_logprob": float(np.nanmin(logprob[sl])),
-            "centroid": h.mean(axis=0) if h is not None else None,
-            "smell": bool(LEXICAL_SMELLS.search(text[seg_start_char:end_char])),
-        }
-        seg["score"] = score_segment(seg, history)
-        return seg
-
-    step = 0
-    while step < max_new_tokens:
-        tok = _sample(logits.cpu(), temperature, top_p, gen)
-        h = out.hidden_states[CAPTURE_LAYER][0, -1].float().cpu().numpy()
-        logps = F.log_softmax(logits, dim=-1)
-        entropy.append(float(-(logps.exp() * logps).sum()))
-        logprob.append(float(logps[tok]))
-        hidden.append(h)
-        ids.append(tok)
-        text += tokenizer.decode([tok])
-        step += 1
-
-        if tok == tokenizer.eos_token_id:
-            break
-
-        # --- online boundary check --------------------------------------
-        b = find_boundary(text, probe_char)
-        if b is not None:
-            # map char boundary -> token index
-            # char->token map: walk per-token decodes (consistent with `text`)
-            pos, end_tok = 0, len(ids)
-            for i, tid in enumerate(ids):
-                pos += len(tokenizer.decode([tid]))
-                if pos >= b:
-                    end_tok = i + 1
-                    break
-            if end_tok - seg_start_tok < MIN_SEG_TOKENS:
-                probe_char = b          # too short: merge onwards, keep searching
-            else:
-                seg = close_segment(end_tok, b)
-                segments.append(seg)
-                flagged = seg["score"] > thresh
-                if verbose:
-                    print(f"  seg {seg['idx']:2d} tok {seg['tok_start']:4d}-"
-                          f"{seg['tok_end']:4d} score {seg['score']:+.2f}"
-                          f"{'  << FLAG' if flagged else ''}")
-                if flagged and mode != "plain" and rollbacks < max_rollbacks:
-                    rollbacks += 1
-                    abandoned.append({
-                        "at_segment": seg["idx"], "text": text,
-                        "ids": list(ids), "entropy": list(entropy),
-                        "logprob": list(logprob),
-                    })
-                    if mode == "rollback":
-                        ck = prompt_len + seg["tok_start"]
-                        # before cropping: [prompt][good prefix][flagged segment]
-                        # after cropping: [prompt][good prefix]
-                        cache.crop(ck)
-
-                        # delete the flagged segment from the other stored data
-                        del ids[seg["tok_start"]:]
-                        del entropy[seg["tok_start"]:]
-                        del logprob[seg["tok_start"]:]
-                        del hidden[seg["tok_start"]:]
-                        text = text[:seg_start_char]
-                        segments.pop()          # the bad segment is gone
-                        events.append({"type": "rollback", "to_tok": seg["tok_start"],
-                                       "score": seg["score"]})
-                        cont_ids = []
-                        if inject_hint:
-                            cont_ids = tokenizer(HINT, add_special_tokens=False)["input_ids"]
-                        if cont_ids:
-                            ct = torch.tensor([cont_ids], device=model.device)
-                            out = model(input_ids=ct, past_key_values=cache,
-                                        use_cache=True, output_hidden_states=True)
-                            n_forward += len(cont_ids)
-                            for htok in cont_ids:
-                                ids.append(htok)
-                                text += tokenizer.decode([htok])
-                                entropy.append(np.nan); logprob.append(np.nan)
-                                hidden.append(out.hidden_states[CAPTURE_LAYER][0, -1]
-                                              .float().cpu().numpy())
-                            seg_start_tok, seg_start_char = len(ids), len(text)
-                            probe_char = len(text)
-                            logits = out.logits[0, -1].float()
-                            step = len(ids)
-                            continue
-                        else:
-                            # need fresh logits at the checkpoint: cheapest is to
-                            # re-run the last checkpoint token -- crop one extra
-                            cache.crop(ck - 1)
-                            last = torch.tensor([[input_ids[0, -1] if not ids
-                                                  else ids[-1]]], device=model.device)
-                            out = model(input_ids=last, past_key_values=cache,
-                                        use_cache=True, output_hidden_states=True)
-                            n_forward += 1
-                            seg_start_tok, seg_start_char = len(ids), len(text)
-                            probe_char = len(text)
-                            logits = out.logits[0, -1].float()
-                            step = len(ids)
-                            continue
-                    else:  # restart baseline: full re-prefill
-                        cache = DynamicCache()
-                        out = model(input_ids=input_ids, past_key_values=cache,
-                                    use_cache=True, output_hidden_states=True)
-                        n_forward += prompt_len
-                        n_prefills += 1
-                        logits = out.logits[0, -1].float()
-                        ids, text = [], ""
-                        entropy, logprob, hidden = [], [], []
-                        seg_start_tok, seg_start_char, probe_char = 0, 0, 0
-                        history, segments = [], []
-                        events.append({"type": "restart", "score": seg["score"]})
-                        step = 0
-                        continue
-                history.append(seg)
-                seg_start_tok, seg_start_char = seg["tok_end"], b
-                probe_char = b
-
-        # --- ordinary decode step ---------------------------------------
-        nt = torch.tensor([[tok]], device=model.device)
-        out = model(input_ids=nt, past_key_values=cache, use_cache=True,
-                    output_hidden_states=True)
-        logits = out.logits[0, -1].float()
-        n_forward += 1
-
-    # close the trailing segment for bookkeeping
-    if len(ids) - seg_start_tok > 0:
-        seg = close_segment(len(ids), len(text))
-        segments.append(seg)
-
-    return {
-        "mode": mode, "text": text, "ids": ids,
-        "entropy": np.array(entropy), "logprob": np.array(logprob),
-        "hidden": np.stack(hidden) if hidden else np.zeros((0, 1)),
-        "segments": segments, "events": events, "abandoned": abandoned,
-        "rollbacks": rollbacks,
-        "n_forward": n_forward, "n_prefills": n_prefills,
-        "gen_tokens": len(ids) + sum(len(a["ids"]) for a in abandoned),
-        "wall_s": time.time() - t0,
-    }
-
-CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
-CLAIM_FALSE = re.compile(r"counterexample|statement is false|does not hold"
-                         r"|cannot be proved", re.IGNORECASE)
-
-
-def proxy_outcome(text):
-    """Stub outcome until Lean verification is wired in."""
-    if CLAIM_FALSE.search(text):
-        return "claims_false"
-    if CLAIM_PROOF.search(text):
-        return "claims_proof"
-    return "no_conclusion"
-
 """## Visualization — signal timeline with rollback markers
 
 Entropy (top) and chosen-token logprob (bottom) over the *live* trace. Segment
@@ -485,28 +111,6 @@ boundaries are vertical lines, flagged-then-rolled-back positions are red marker
 hint injections show as gaps (hint tokens are forced, so they carry no sampling
 entropy).
 """
-
-import matplotlib.pyplot as plt
-
-def plot_timeline(res, title="CoT signal timeline"):
-    fig, axes = plt.subplots(2, 1, figsize=(13, 5.5), sharex=True,
-                             gridspec_kw={"height_ratios": [2, 1]})
-    x = np.arange(len(res["entropy"]))
-    axes[0].plot(x, res["entropy"], lw=0.8)
-    axes[0].set_ylabel("entropy")
-    axes[1].plot(x, res["logprob"], lw=0.8, color="tab:orange")
-    axes[1].set_ylabel("logprob"); axes[1].set_xlabel("generated token")
-    for s in res["segments"]:
-        for ax in axes:
-            ax.axvline(s["tok_start"], color="gray", lw=0.5, alpha=0.5)
-        axes[0].text(s["tok_start"], axes[0].get_ylim()[1]*0.95,
-                     f"{s['score']:+.1f}", fontsize=7, color="gray")
-    for e in res["events"]:
-        if e["type"] == "rollback":
-            for ax in axes:
-                ax.axvline(e["to_tok"], color="red", lw=1.5, alpha=0.8)
-    axes[0].set_title(title + f"  ({res['rollbacks']} rollbacks)")
-    plt.tight_layout(); plt.show()
 
 """## Evaluation — does checkpointing help, and is it cheaper?
 
@@ -522,31 +126,6 @@ The outcome column is still the regex proxy — wire in Lean checking (last cell
 believing any of the outcome numbers.
 """
 
-import pandas as pd
-
-def run_eval(modes=("plain", "rollback", "restart"), seeds=(0, 1),
-             max_new_tokens=384, thresh=1.8, items=None):
-    rows = []
-    for item in (items or MINIMAL_PAIRS):
-        for variant in ("fixed", "buggy"):
-            prompt = build_prompt(item, variant)
-            for mode in modes:
-                for seed in seeds:
-                    r = prove(prompt, mode=mode, max_new_tokens=max_new_tokens,
-                              thresh=thresh, seed=seed)
-                    rows.append({
-                        "id": item["id"], "variant": variant,
-                        "provable": item[variant]["provable"],
-                        "mode": mode, "seed": seed,
-                        "outcome": proxy_outcome(r["text"]),
-                        "interventions": r["rollbacks"],
-                        "gen_tokens": r["gen_tokens"],
-                        "n_forward": r["n_forward"],
-                        "prefills": r["n_prefills"],
-                        "wall_s": r["wall_s"],
-                    })
-    return pd.DataFrame(rows)
-
 def main():
     """Run one bounded smoke test; the full evaluation is opt-in."""
     import argparse
@@ -559,6 +138,24 @@ def main():
     parser.add_argument("--plot", action="store_true",
                         help="show plots after generation")
     args = parser.parse_args()
+
+    model, tokenizer, capture_layer = load_model_runtime(
+        PROJECT_CACHE,
+        dry_run=DRY_RUN,
+        device_request=DEVICE_REQUEST,
+    )
+    prove = partial(
+        run_proof,
+        model=model,
+        tokenizer=tokenizer,
+        capture_layer=capture_layer,
+    )
+    run_rollback_eval = partial(
+        run_eval,
+        MINIMAL_PAIRS,
+        build_prompt,
+        prove,
+    )
 
     if not args.eval:
         item = MINIMAL_PAIRS[0]
@@ -583,7 +180,7 @@ def main():
         return
 
     # Lowering the threshold below zero guarantees interventions.
-    df = run_eval(max_new_tokens=args.max_new_tokens, thresh=-1.0)
+    df = run_rollback_eval(max_new_tokens=args.max_new_tokens, thresh=-1.0)
     print(df.to_string(index=False))
     print("\nOutcome by variant x mode:")
     print(pd.crosstab([df.variant, df["mode"]], df.outcome))
@@ -601,6 +198,8 @@ def main():
     print(comp)
 
     if args.plot:
+        import matplotlib.pyplot as plt
+
         fig, ax = plt.subplots(figsize=(6, 3.2))
         comp["fw_passes"].plot.bar(
             ax=ax, color=["gray", "tab:green", "tab:red"]
