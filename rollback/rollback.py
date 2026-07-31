@@ -33,6 +33,11 @@ apples-to-apples: same sampler, same seeds, same detector.
 # GEOMETRIC_CANARIES_DRY_RUN=0 only in a GPU environment with the optional
 # `gpu` dependency group installed.
 import os
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import BitsAndBytesConfig
+from rollback_rust import LEAN_MODELS, build_prompt
+from rollback_utils import encode_prompt
 
 PROJECT_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache")
 os.environ.setdefault("HF_HOME", os.path.join(PROJECT_CACHE, "huggingface"))
@@ -45,7 +50,7 @@ if DEVICE_REQUEST not in {"auto", "cpu", "cuda"}:
         "GEOMETRIC_CANARIES_DEVICE must be one of: auto, cpu, cuda"
     )
 
-import torch
+
 CUDA_AVAILABLE = torch.cuda.is_available()
 if DEVICE_REQUEST == "cuda" and not CUDA_AVAILABLE:
     raise RuntimeError(
@@ -71,7 +76,6 @@ elif not DRY_RUN:
     print("!! no GPU — set DRY_RUN = True or switch runtime")
 
 # --- Model -------------------------------------------------------------
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # small testing model (0.5 B parameters) w/ 32 bit
 # for quick pipeline testing
@@ -83,7 +87,6 @@ if DRY_RUN:
 # larger model (7 B) w/ 4 (16) bit quantization for storage (calculation) in GPU
 # for precision
 else:
-    from transformers import BitsAndBytesConfig
 
     MODEL_ID = "deepseek-ai/DeepSeek-Prover-V2-7B"
     bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=MODEL_DTYPE,
@@ -103,19 +106,6 @@ if tokenizer.pad_token_id is None:
 N_LAYERS = model.config.num_hidden_layers
 CAPTURE_LAYER = int(N_LAYERS * 0.65)      # residual stream, ~2/3 depth
 
-def encode_prompt(prompt):
-    """Chat-template the prompt (DSP-V2 is a chat model); fall back to raw."""
-    # wrap in the model’s chat format and then converts that entire formatted text into numerical token IDs
-    try:
-        out = tokenizer.apply_chat_template([{"role": "user", "content": prompt}],
-                                            add_generation_prompt=True,
-                                            return_tensors="pt")
-        return out["input_ids"] if isinstance(out, dict) else \
-               (out.input_ids if hasattr(out, "input_ids") else out)
-    # converts only the exact raw text
-    except Exception:
-        return tokenizer(prompt, return_tensors="pt").input_ids
-
 print(f"{MODEL_ID}: {N_LAYERS} layers, capturing layer {CAPTURE_LAYER}")
 
 """## Dataset — 3 Aeneas-style minimal pairs
@@ -128,109 +118,6 @@ mutation + real-advisory dataset from the previous notebook drops back in unchan
 the loop is trusted — `prove()` only needs `build_prompt(item, variant)`.
 """
 
-LEAN_PREAMBLE = '''\
-/- Minimal self-contained stand-in for the Aeneas Lean support library. -/
-inductive Result (\u03b1 : Type) where
-  | ok (v : \u03b1)
-  | fail
-deriving Repr, DecidableEq
-
-instance : Monad Result where
-  pure := Result.ok
-  bind x f := match x with | .ok v => f v | .fail => .fail
-
-abbrev U32.max : Nat := 4294967295
-
-/-- Machine-integer ops are fallible, as in the Aeneas translation:
-    overflow/underflow surfaces as `.fail` (a Rust panic). -/
-def U32.add (a b : Nat) : Result Nat :=
-  if a + b \u2264 U32.max then .ok (a + b) else .fail
-
-def U32.sub (a b : Nat) : Result Nat :=
-  if b \u2264 a then .ok (a - b) else .fail
-
-def U32.mul (a b : Nat) : Result Nat :=
-  if a * b \u2264 U32.max then .ok (a * b) else .fail
-
-/-- Fallible indexing: out-of-bounds is a panic (`.fail`). -/
-def List.index (l : List \u03b1) (i : Nat) : Result \u03b1 :=
-  match l.get? i with
-  | some v => .ok v
-  | none => .fail
-'''
-
-def rust_comment(name):
-    return f"-- Aeneas-style translation of Rust `{name}`\n"
-
-LEAN_MODELS = {
-    "binary_search": {
-        "bug_type": "progress_bug",
-        "real_world_analogue": "loop-progress / midpoint bug family "
-                               "(cf. the JDK Arrays.binarySearch overflow, Bloch 2006)",
-        "fixed_defn": rust_comment("binary_search") + '''\
-def binary_search_loop (v : List Nat) (x lo hi fuel : Nat) :
-    Result (Option Nat) :=
-  match fuel with
-  | 0 => .fail
-  | Nat.succ fuel =>
-    if lo < hi then do
-      let mid := lo + (hi - lo) / 2
-      let vm \u2190 v.index mid
-      if vm = x then .ok (some mid)
-      else if vm < x then binary_search_loop v x (mid + 1) hi fuel
-      else binary_search_loop v x lo mid fuel
-    else .ok none
-
-def binary_search (v : List Nat) (x : Nat) : Result (Option Nat) :=
-  binary_search_loop v x 0 v.length (v.length + 1)''',
-        "buggy_defn": rust_comment("binary_search") + '''\
-def binary_search_loop (v : List Nat) (x lo hi fuel : Nat) :
-    Result (Option Nat) :=
-  match fuel with
-  | 0 => .fail
-  | Nat.succ fuel =>
-    if lo < hi then do
-      let mid := lo + (hi - lo) / 2
-      let vm \u2190 v.index mid
-      if vm = x then .ok (some mid)
-      else if vm < x then binary_search_loop v x mid hi fuel
-      else binary_search_loop v x lo mid fuel
-    else .ok none
-
-def binary_search (v : List Nat) (x : Nat) : Result (Option Nat) :=
-  binary_search_loop v x 0 v.length (v.length + 1)''',
-        "spec": '''\
-theorem binary_search_total (v : List Nat) (x : Nat) :
-    \u2203 r, binary_search v x = .ok r := by sorry''',
-    },
-    "sat_sub": {
-        "bug_type": "underflow_panic",
-        "real_world_analogue": "integer-underflow panic class "
-                               "(recurring RustSec advisory category)",
-        "fixed_defn": rust_comment("sat_sub") + '''\
-def satSub (a b : Nat) : Result Nat :=
-  if a \u2265 b then U32.sub a b else .ok 0''',
-        "buggy_defn": rust_comment("sat_sub") + '''\
-def satSub (a b : Nat) : Result Nat :=
-  U32.sub a b''',
-        "spec": '''\
-theorem satSub_total (a b : Nat) : \u2203 v, satSub a b = .ok v := by sorry''',
-    },
-    "clamp": {
-        "bug_type": "flipped_comparison",
-        "real_world_analogue": "comparison-flip logic-error family",
-        "fixed_defn": rust_comment("clamp") + '''\
-def clamp (lo hi x : Nat) : Nat :=
-  if x < lo then lo else if x > hi then hi else x''',
-        "buggy_defn": rust_comment("clamp") + '''\
-def clamp (lo hi x : Nat) : Nat :=
-  if x < lo then lo else if x \u2265 hi then x else x''',
-        "spec": '''\
-theorem clamp_le (lo hi x : Nat) (h : lo \u2264 hi) :
-    clamp lo hi x \u2264 hi := by sorry''',
-    },
-}
-
 MINIMAL_PAIRS = []
 for name, m in LEAN_MODELS.items():
     MINIMAL_PAIRS.append({
@@ -242,27 +129,6 @@ for name, m in LEAN_MODELS.items():
         "buggy": {"defn": m["buggy_defn"], "spec": m["spec"], "provable": False},
     })
 
-# DeepSeek-Prover-V2 CoT prompt format: "Complete the following Lean 4 code" with a
-# proof-plan instruction, matching the model's training distribution. The Mathlib
-# header matches the distribution too; our preamble is self-contained, so offline
-# checking can drop the import if you verify without Mathlib.
-DSP_HEADER = "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 400000\n\n"
-
-def build_prompt(item, variant, use_mathlib_header=True):
-    v = item[variant]
-    code_block = ((DSP_HEADER if use_mathlib_header else "")
-                  + LEAN_PREAMBLE + "\n" + v["defn"] + "\n\n" + v["spec"])
-    return (
-        "Complete the following Lean 4 code:\n\n```lean4\n" + code_block
-        + "\n```\n\n"
-        "Before producing the Lean 4 code to formally prove the given theorem, "
-        "provide a detailed proof plan outlining the main proof steps and "
-        "strategies.\n"
-        "The plan should highlight key ideas, intermediate lemmas, and proof "
-        "structures that will guide the construction of the final formal proof. "
-        "If the statement is false, state this explicitly and give a concrete "
-        "counterexample instead of a proof."
-    )
 
 print(f"{len(MINIMAL_PAIRS)} minimal pairs: "
       + ", ".join(p["id"] for p in MINIMAL_PAIRS))
@@ -421,7 +287,7 @@ def prove(prompt, mode="rollback", max_new_tokens=512, max_rollbacks=3,
     """
     t0 = time.time()
     gen = torch.Generator(device="cpu").manual_seed(seed)
-    input_ids = encode_prompt(prompt).to(model.device)
+    input_ids = encode_prompt(prompt, tokenizer).to(model.device)
     prompt_len = input_ids.shape[1]
 
     # stores those key/value vectors as new tokens are generated (dynamic)
