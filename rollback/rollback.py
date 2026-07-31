@@ -128,30 +128,23 @@ believing any of the outcome numbers.
 """
 
 def main():
-    """Run the full evaluation with plots by default; use --no-eval or --no-plot to disable them."""
+    """Run the full evaluation, or one example when requested."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--no-eval",
-        dest="eval",
-        action="store_false",
-        help="run one smoke test instead of the full comparison",
+        "--single-example",
+        action="store_true",
+        help="run one example instead of the full comparison",
     )
     parser.add_argument(
         "--max-new-tokens",
         type=int,
         default=512,
-        help="generation limit per attempt (default: 64)",
-    )
-    parser.add_argument(
-        "--no-plot",
-        dest="plot",
-        action="store_false",
-        help="do not show plots after generation",
+        help="generation limit per attempt (default: 512)",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="use the small model for a smoke test",
+        help="use the small model for a quick run",
     )
     args = parser.parse_args()
     print(f"Max new tokens: {args.max_new_tokens}")
@@ -173,7 +166,7 @@ def main():
         build_prompt,
         prove,
     )
-    if not args.eval:
+    if args.single_example:
         item = MINIMAL_PAIRS[0]
         res = prove(
             build_prompt(item, "buggy"),
@@ -191,8 +184,7 @@ def main():
             print("  event:", event)
         print("\noutcome:", proxy_outcome(res["text"]))
         print("\n--- final text (tail) ---\n", res["text"][-800:])
-        if args.plot:
-            plot_timeline(res, title=f"{item['id']} / buggy / rollback")
+        plot_timeline(res, title=f"{item['id']} / buggy / rollback")
         return
 
     # Lowering the threshold below zero guarantees interventions.
@@ -219,16 +211,15 @@ def main():
     ).round(0)
     print(comp)
 
-    if args.plot:
 
-        fig, ax = plt.subplots(figsize=(6, 3.2))
-        comp["fw_passes"].plot.bar(
-            ax=ax, color=["gray", "tab:green", "tab:red"]
-        )
-        ax.set_ylabel("mean forward passes / run")
-        ax.set_title("Compute cost by mode (lower = cheaper)")
-        plt.tight_layout()
-        plt.show()
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    comp["fw_passes"].plot.bar(
+        ax=ax, color=["gray", "tab:green", "tab:red"]
+    )
+    ax.set_ylabel("mean forward passes / run")
+    ax.set_title("Compute cost by mode (lower = cheaper)")
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
