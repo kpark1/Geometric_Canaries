@@ -1,7 +1,7 @@
 import os
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
 def load_model_runtime(project_cache, dry_run=True, device_request="auto"):
@@ -46,7 +46,6 @@ def load_model_runtime(project_cache, dry_run=True, device_request="auto"):
             cache_dir=huggingface_cache,
         )
     else:
-        from transformers import BitsAndBytesConfig
 
         model_id = "deepseek-ai/DeepSeek-Prover-V2-7B"
         bnb = BitsAndBytesConfig(

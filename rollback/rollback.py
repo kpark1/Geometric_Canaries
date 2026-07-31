@@ -29,17 +29,18 @@ apples-to-apples: same sampler, same seeds, same detector.
 """
 
 # --- Setup -------------------------------------------------------------
+import argparse
 import os
 from functools import partial
 
+import matplotlib.pyplot as plt
 import pandas as pd
 
+from draw import plot_timeline
 from evaluate import proxy_outcome, run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
 from rollback_rust import LEAN_MODELS, build_prompt
-from draw import plot_timeline
-
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
@@ -127,25 +128,39 @@ believing any of the outcome numbers.
 """
 
 def main():
-    """Run one bounded smoke test; the full evaluation is opt-in."""
-    import argparse
-
+    """Run the full evaluation with plots by default; use --no-eval or --no-plot to disable them."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--eval", action="store_true",
-                        help="run the full comparison instead of one smoke test")
-    parser.add_argument("--max-new-tokens", type=int, default=64,
-                        help="generation limit per attempt (default: 64)")
-    parser.add_argument("--plot", action="store_true",
-                        help="show plots after generation")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="use the small model for a smoke test")
+    parser.add_argument(
+        "--no-eval",
+        dest="eval",
+        action="store_false",
+        help="run one smoke test instead of the full comparison",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=512,
+        help="generation limit per attempt (default: 64)",
+    )
+    parser.add_argument(
+        "--no-plot",
+        dest="plot",
+        action="store_false",
+        help="do not show plots after generation",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="use the small model for a smoke test",
+    )
     args = parser.parse_args()
-
+    print(f"Max new tokens: {args.max_new_tokens}")
     model, tokenizer, capture_layer = load_model_runtime(
         PROJECT_CACHE,
         dry_run=args.dry_run,
         device_request=DEVICE_REQUEST,
     )
+
     prove = partial(
         run_proof,
         model=model,
@@ -158,7 +173,6 @@ def main():
         build_prompt,
         prove,
     )
-
     if not args.eval:
         item = MINIMAL_PAIRS[0]
         res = prove(
@@ -185,7 +199,13 @@ def main():
     df = run_rollback_eval(max_new_tokens=args.max_new_tokens, thresh=-1.0)
     print(df.to_string(index=False))
     print("\nOutcome by variant x mode:")
-    print(pd.crosstab([df.variant, df["mode"]], df.outcome))
+    outcome_table = pd.crosstab(
+        [df.variant, df["mode"]], df.outcome
+    ).reindex(
+        columns=["claims_proof", "claims_false", "no_conclusion"],
+        fill_value=0,
+    )
+    print(outcome_table)
 
     print("\nCompute by mode:")
     comp = df.groupby("mode").agg(
@@ -200,7 +220,6 @@ def main():
     print(comp)
 
     if args.plot:
-        import matplotlib.pyplot as plt
 
         fig, ax = plt.subplots(figsize=(6, 3.2))
         comp["fw_passes"].plot.bar(
