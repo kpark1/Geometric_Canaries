@@ -1,3 +1,4 @@
+import logging
 import time
 
 import numpy as np
@@ -13,9 +14,13 @@ from segment import (
     score_segment,
 )
 
+# OLD: from state import Token, State, RunStats
+from state import RunStats, Segment, State, Token  # NEW
 
 HINT = ("\nWait -- let me re-check the last step carefully before continuing. "
         "I should verify each claim against the definitions.\n")
+
+logger = logging.getLogger(__name__)
 
 
 def _sample(logits, temperature, top_p, gen):
@@ -34,10 +39,19 @@ def _sample(logits, temperature, top_p, gen):
     return int(si[idx])
 
 
+def _token_index_at_char(ids, char_index, tokenizer):
+    """Map a decoded character boundary to an exclusive token index."""
+    for i in range(len(ids)):
+        prefix = tokenizer.decode(ids[:i + 1], skip_special_tokens=True)
+        if len(prefix) >= char_index:
+            return i + 1
+    return len(ids)
+
+
 @torch.no_grad()
-def prove(prompt, model, tokenizer, capture_layer, mode="rollback", max_new_tokens=512, max_rollbacks=3,
-          thresh=1.8, temperature=1.0, top_p=0.95, seed=0, inject_hint=True,
-          verbose=False):
+def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
+          max_new_tokens=512, max_rollbacks=3, thresh=1.8,
+          temperature=1.0, top_p=0.95, seed=0, inject_hint=True):
     """One streaming generate-detect-rollback run.
 
     mode:
@@ -56,190 +70,306 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback", max_new_toke
     and wall-time accounting, and abandoned branches (counterfactual data).
 
     procedures summary:
-    Model generates tokens
-    → code detects a boundary
-    → segment is “closed”
-    → its statistics are calculated
-    → it is scored
-    → accepted or rolled back
-    → next segment begins
+    generate one token
+    ↓
+    append it and decode the accumulated text
+    ↓
+    is there a new boundary?
+    ├── no  → generate the next token
+    └── yes → is the segment at least 8 tokens?
+              ├── no  → keep accumulating
+              └── yes → close and score the segment
+                        ↓
+                        score above threshold?
+                        ├── no  → accept and begin next segment
+                        └── yes → roll back and regenerate
     """
     t0 = time.time()
     gen = torch.Generator(device="cpu").manual_seed(seed)
     input_ids = encode_prompt(prompt, tokenizer).to(model.device)
     prompt_len = input_ids.shape[1]
 
-    # stores those key/value vectors as new tokens are generated (dynamic)
     cache = DynamicCache()
-    out = model(input_ids=input_ids, past_key_values=cache, use_cache=True,
-                output_hidden_states=True)
+    out = model(
+        input_ids=input_ids,
+        past_key_values=cache,
+        use_cache=True,
+        output_hidden_states=True,
+    )
     logits = out.logits[0, -1].float()
-    n_forward = prompt_len          # prefill counts once; rollback never repeats it
 
-    """
-    prefill: counts how many times the whole original prompt has been processed
-    generation: one new token per model call
-      in rollback mode, it remains 1, because cropping preserves the cached prompt
-      in restart mode, the cache is thrown away and the prompt is processed again:
-    """
-    n_prefills = 1
+    state = State()
+    stats = RunStats(n_forward=prompt_len, n_prefills=1)
+    history = []
+    segments = []
 
-    # live state (generation-relative)
-    ids, text = [], ""
-    entropy, logprob, hidden = [], [], []
+    logger.debug(
+        "initial state: prompt_len=%d step=%d ids=%r text=%r "
+        "seg_start_tok=%d seg_start_char=%d probe_char=%d",
+        prompt_len,
+        state.step,
+        state.ids,
+        state.text,
+        state.seg_start_tok,
+        state.seg_start_char,
+        state.probe_char,
+    )
 
-    # mark where the current unfinished segment begins in ids (seg_start_tok) and text (seg_start_char)
-    seg_start_tok, seg_start_char = 0, 0
+    def close_segment(seg_end_tok, seg_end_char):
+        segment = Segment(
+            state=state,
+            seg_start_tok=state.seg_start_tok,
+            seg_end_tok=seg_end_tok,
+            seg_start_char=state.seg_start_char,
+            seg_end_char=seg_end_char,
+        )
+        snapshot = segment.snapshot(lexical_smells=LEXICAL_SMELLS)
+        snapshot["score"] = score_segment(snapshot, history)
+        return snapshot
 
-    # where to resume searching for a future boundary
-    probe_char = 0                  # search cursor: skips rejected (too-short) boundaries
-    history, segments, events, abandoned = [], [], [], []
-    rollbacks = 0
+    while state.step < max_new_tokens:
+        logger.debug(
+            "step %d start: ids_len=%d text_len=%d",
+            state.step,
+            len(state.ids),
+            len(state.text),
+        )
 
-    # decides that the current reasoning step has ended, so it packages and scores it
-    def close_segment(end_tok, end_char):
-        sl = slice(seg_start_tok, end_tok)
-        h = np.stack(hidden[sl]) if hidden[sl] else None
-        seg = {
-            "idx": len(segments),
-            "tok_start": seg_start_tok, "tok_end": end_tok,
-            "text": text[seg_start_char:end_char],
-            "mean_entropy": float(np.nanmean(entropy[sl])),
-            "min_logprob": float(np.nanmin(logprob[sl])),
-            "centroid": h.mean(axis=0) if h is not None else None,
-            "smell": bool(LEXICAL_SMELLS.search(text[seg_start_char:end_char])),
-        }
-        seg["score"] = score_segment(seg, history)
-        return seg
-
-    step = 0
-    while step < max_new_tokens:
         tok = _sample(logits.cpu(), temperature, top_p, gen)
-        h = out.hidden_states[capture_layer][0, -1].float().cpu().numpy()
-        logps = F.log_softmax(logits, dim=-1)
-        entropy.append(float(-(logps.exp() * logps).sum()))
-        logprob.append(float(logps[tok]))
-        hidden.append(h)
-        ids.append(tok)
-        text += tokenizer.decode([tok])
-        step += 1
+        predictive_hidden = (
+            out.hidden_states[capture_layer][0, -1]
+            .float()
+            .cpu()
+            .numpy()
+        )
+        token = Token(
+            token_id=tok,
+            logits=logits,
+            hidden=predictive_hidden,
+        )
+        state.add_token(token)
+        state.decode(tokenizer)
+
+        logger.debug(
+            "sampled token: step=%d token_id=%d raw=%r entropy=%r "
+            "logprob=%r hidden_shape=%r text_tail=%r",
+            state.step,
+            tok,
+            tokenizer.convert_ids_to_tokens(tok),
+            token.entropy,
+            token.logprob,
+            token.hidden.shape,
+            state.text[-120:],
+        )
 
         if tok == tokenizer.eos_token_id:
+            logger.debug("EOS reached at step %d", state.step)
             break
 
-        # --- online boundary check --------------------------------------
-        b = find_boundary(text, probe_char)
-        if b is not None:
-            # map char boundary -> token index
-            # char->token map: walk per-token decodes (consistent with `text`)
-            pos, end_tok = 0, len(ids)
-            for i, tid in enumerate(ids):
-                pos += len(tokenizer.decode([tid]))
-                if pos >= b:
-                    end_tok = i + 1
-                    break
-            if end_tok - seg_start_tok < MIN_SEGMENT_TOKENS:
-                probe_char = b          # too short: merge onwards, keep searching
+        boundary_char = find_boundary(state.text, state.probe_char)
+        logger.debug(
+            "boundary search: probe_char=%d result=%r",
+            state.probe_char,
+            boundary_char,
+        )
+
+        if boundary_char is not None:
+            seg_end_tok = _token_index_at_char(
+                state.ids,
+                boundary_char,
+                tokenizer,
+            )
+            segment_token_count = seg_end_tok - state.seg_start_tok
+
+            if segment_token_count < MIN_SEGMENT_TOKENS:
+                state.probe_char = boundary_char
+                logger.debug(
+                    "boundary rejected: token_count=%d minimum=%d",
+                    segment_token_count,
+                    MIN_SEGMENT_TOKENS,
+                )
             else:
-                seg = close_segment(end_tok, b)
-                segments.append(seg)
-                flagged = seg["score"] > thresh
-                if verbose:
-                    print(f"  seg {seg['idx']:2d} tok {seg['tok_start']:4d}-"
-                          f"{seg['tok_end']:4d} score {seg['score']:+.2f}"
-                          f"{'  << FLAG' if flagged else ''}")
-                if flagged and mode != "plain" and rollbacks < max_rollbacks:
-                    rollbacks += 1
-                    abandoned.append({
-                        "at_segment": seg["idx"], "text": text,
-                        "ids": list(ids), "entropy": list(entropy),
-                        "logprob": list(logprob),
+                segment = close_segment(seg_end_tok, boundary_char)
+                flagged = segment["score"] > thresh
+                logger.debug(
+                    "segment closed: tok_range=(%d, %d) text=%r "
+                    "mean_entropy=%r min_logprob=%r smell=%r "
+                    "score=%r flagged=%r",
+                    segment["tok_start"],
+                    segment["tok_end"],
+                    segment["text"],
+                    segment["mean_entropy"],
+                    segment["min_logprob"],
+                    segment["smell"],
+                    segment["score"],
+                    flagged,
+                )
+
+                # Should the program reject this segment and perform the
+                # configured intervention?
+                should_intervene = (
+                    flagged
+                    and mode != "plain"
+                    and stats.rollbacks < max_rollbacks
+                )
+                if should_intervene:
+                    stats.rollbacks += 1
+                    stats.abandoned.append({
+                        "segment_start_tok": segment["tok_start"],
+                        "segment_end_tok": segment["tok_end"],
+                        "text": state.text,
+                        "ids": list(state.ids),
+                        "entropy": [t.entropy for t in state.tokens],
+                        "logprob": [t.logprob for t in state.tokens],
                     })
+
                     if mode == "rollback":
-                        ck = prompt_len + seg["tok_start"]
-                        # before cropping: [prompt][good prefix][flagged segment]
-                        # after cropping: [prompt][good prefix]
-                        cache.crop(ck)
+                        checkpoint = prompt_len + segment["tok_start"]
+                        cache.crop(checkpoint)
+                        state.truncate(segment["tok_start"], tokenizer)
+                        stats.events.append({
+                            "type": "rollback",
+                            "to_tok": segment["tok_start"],
+                            "score": segment["score"],
+                        })
 
-                        # delete the flagged segment from the other stored data
-                        del ids[seg["tok_start"]:]
-                        del entropy[seg["tok_start"]:]
-                        del logprob[seg["tok_start"]:]
-                        del hidden[seg["tok_start"]:]
-                        text = text[:seg_start_char]
-                        segments.pop()          # the bad segment is gone
-                        events.append({"type": "rollback", "to_tok": seg["tok_start"],
-                                       "score": seg["score"]})
-                        cont_ids = []
+                        hint_ids = []
                         if inject_hint:
-                            cont_ids = tokenizer(HINT, add_special_tokens=False)["input_ids"]
-                        if cont_ids:
-                            ct = torch.tensor([cont_ids], device=model.device)
-                            out = model(input_ids=ct, past_key_values=cache,
-                                        use_cache=True, output_hidden_states=True)
-                            n_forward += len(cont_ids)
-                            for htok in cont_ids:
-                                ids.append(htok)
-                                text += tokenizer.decode([htok])
-                                entropy.append(np.nan); logprob.append(np.nan)
-                                hidden.append(out.hidden_states[capture_layer][0, -1]
-                                              .float().cpu().numpy())
-                            seg_start_tok, seg_start_char = len(ids), len(text)
-                            probe_char = len(text)
+                            hint_ids = tokenizer(
+                                HINT,
+                                add_special_tokens=False,
+                            )["input_ids"]
+
+                        if hint_ids:
+                            hint_tensor = torch.tensor(
+                                [hint_ids],
+                                device=model.device,
+                            )
+                            out = model(
+                                input_ids=hint_tensor,
+                                past_key_values=cache,
+                                use_cache=True,
+                                output_hidden_states=True,
+                            )
+                            stats.add_forward(len(hint_ids))
+
+                            hidden_size = out.hidden_states[capture_layer].shape[-1]
+                            for hint_token_id in hint_ids:
+                                hint_hidden = np.full(
+                                    hidden_size,
+                                    np.nan,
+                                    dtype=np.float32,
+                                )
+                                state.add_token(Token.forced(
+                                    token_id=hint_token_id,
+                                    hidden=hint_hidden,
+                                ))
+
+                            state.decode(tokenizer)
+                            state.seg_start_tok = state.step
+                            state.seg_start_char = len(state.text)
+                            state.probe_char = len(state.text)
                             logits = out.logits[0, -1].float()
-                            step = len(ids)
                             continue
+
+                        cache.crop(checkpoint - 1)
+                        if state.ids:
+                            last_token = torch.tensor(
+                                [[state.ids[-1]]],
+                                device=model.device,
+                            )
                         else:
-                            # need fresh logits at the checkpoint: cheapest is to
-                            # re-run the last checkpoint token -- crop one extra
-                            cache.crop(ck - 1)
-                            last = torch.tensor([[input_ids[0, -1] if not ids
-                                                  else ids[-1]]], device=model.device)
-                            out = model(input_ids=last, past_key_values=cache,
-                                        use_cache=True, output_hidden_states=True)
-                            n_forward += 1
-                            seg_start_tok, seg_start_char = len(ids), len(text)
-                            probe_char = len(text)
-                            logits = out.logits[0, -1].float()
-                            step = len(ids)
-                            continue
-                    else:  # restart baseline: full re-prefill
-                        cache = DynamicCache()
-                        out = model(input_ids=input_ids, past_key_values=cache,
-                                    use_cache=True, output_hidden_states=True)
-                        n_forward += prompt_len
-                        n_prefills += 1
+                            last_token = input_ids[:, -1:]
+
+                        out = model(
+                            input_ids=last_token,
+                            past_key_values=cache,
+                            use_cache=True,
+                            output_hidden_states=True,
+                        )
+                        stats.add_forward(1)
+                        state.seg_start_tok = state.step
+                        state.seg_start_char = len(state.text)
+                        state.probe_char = len(state.text)
                         logits = out.logits[0, -1].float()
-                        ids, text = [], ""
-                        entropy, logprob, hidden = [], [], []
-                        seg_start_tok, seg_start_char, probe_char = 0, 0, 0
-                        history, segments = [], []
-                        events.append({"type": "restart", "score": seg["score"]})
-                        step = 0
                         continue
-                history.append(seg)
-                seg_start_tok, seg_start_char = seg["tok_end"], b
-                probe_char = b
 
-        # --- ordinary decode step ---------------------------------------
-        nt = torch.tensor([[tok]], device=model.device)
-        out = model(input_ids=nt, past_key_values=cache, use_cache=True,
-                    output_hidden_states=True)
+                    if mode == "restart":
+                        cache = DynamicCache()
+                        out = model(
+                            input_ids=input_ids,
+                            past_key_values=cache,
+                            use_cache=True,
+                            output_hidden_states=True,
+                        )
+                        stats.add_forward(prompt_len)
+                        stats.n_prefills += 1
+                        stats.events.append({
+                            "type": "restart",
+                            "score": segment["score"],
+                        })
+                        logits = out.logits[0, -1].float()
+                        state.reset()
+                        history.clear()
+                        segments.clear()
+                        continue
+
+                history.append(segment)
+                segments.append(segment)
+                state.seg_start_tok = segment["tok_end"]
+                state.seg_start_char = segment["char_end"]
+                state.probe_char = segment["char_end"]
+
+        next_token = torch.tensor([[tok]], device=model.device)
+        out = model(
+            input_ids=next_token,
+            past_key_values=cache,
+            use_cache=True,
+            output_hidden_states=True,
+        )
         logits = out.logits[0, -1].float()
-        n_forward += 1
+        stats.add_forward(1)
 
-    # close the trailing segment for bookkeeping
-    if len(ids) - seg_start_tok > 0:
-        seg = close_segment(len(ids), len(text))
-        segments.append(seg)
+    if state.step - state.seg_start_tok > 0:
+        segments.append(close_segment(state.step, len(state.text)))
+
+    entropy = np.array([token.entropy for token in state.tokens])
+    logprob = np.array([token.logprob for token in state.tokens])
+    hidden = (
+        np.stack([token.hidden for token in state.tokens])
+        if state.tokens
+        else np.zeros((0, 1))
+    )
+
+    logger.debug(
+        "final state: ids_len=%d text_len=%d entropy_len=%d "
+        "logprob_len=%d hidden_len=%d segments=%d events=%r rollbacks=%d",
+        len(state.ids),
+        len(state.text),
+        len(entropy),
+        len(logprob),
+        len(hidden),
+        len(segments),
+        stats.events,
+        stats.rollbacks,
+    )
 
     return {
-        "mode": mode, "text": text, "ids": ids,
-        "entropy": np.array(entropy), "logprob": np.array(logprob),
-        "hidden": np.stack(hidden) if hidden else np.zeros((0, 1)),
-        "segments": segments, "events": events, "abandoned": abandoned,
-        "rollbacks": rollbacks,
-        "n_forward": n_forward, "n_prefills": n_prefills,
-        "gen_tokens": len(ids) + sum(len(a["ids"]) for a in abandoned),
+        "mode": mode,
+        "text": state.text,
+        "ids": state.ids,
+        "entropy": entropy,
+        "logprob": logprob,
+        "hidden": hidden,
+        "segments": segments,
+        "events": stats.events,
+        "abandoned": stats.abandoned,
+        "rollbacks": stats.rollbacks,
+        "n_forward": stats.n_forward,
+        "n_prefills": stats.n_prefills,
+        "gen_tokens": (
+            state.step
+            + sum(len(branch["ids"]) for branch in stats.abandoned)
+        ),
         "wall_s": time.time() - t0,
     }

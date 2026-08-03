@@ -30,8 +30,13 @@ apples-to-apples: same sampler, same seeds, same detector.
 
 # --- Setup -------------------------------------------------------------
 import argparse
+import logging
 import os
+import pickle
+import time
+from datetime import datetime
 from functools import partial
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -47,6 +52,8 @@ PROJECT_CACHE = os.path.join(
 )
 # DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
+RESULT_DIR = Path(__file__).parent / "log"
+RESULT_PATTERN = "result_*.pkl"
 
 """## Dataset — 3 Aeneas-style minimal pairs
 
@@ -127,8 +134,100 @@ The outcome column is still the regex proxy — wire in Lean checking (last cell
 believing any of the outcome numbers.
 """
 
+
+def show_single_result(res, item):
+    """Print and plot one generated proof result."""
+    print(f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
+          f"segments={len(res['segments'])}")
+    print(f"forward passes: {res['n_forward']}  "
+          f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s")
+    for event in res["events"]:
+        print("  event:", event)
+    print("\noutcome:", proxy_outcome(res["text"]))
+    print("\n--- final text (tail) ---\n", res["text"][-800:])
+    plot_timeline(res, title=f"{item['id']} / buggy / rollback")
+
+
+def show_eval_result(df):
+    """Print and plot the full evaluation DataFrame."""
+    print(df.to_string(index=False))
+    print("\nOutcome by variant x mode:")
+    outcome_table = pd.crosstab(
+        [df.variant, df["mode"]], df.outcome
+    ).reindex(
+        columns=["claims_proof", "claims_false", "no_conclusion"],
+        fill_value=0,
+    )
+    print(outcome_table)
+
+    print("\nCompute by mode:")
+    comp = df.groupby("mode").agg(
+        interventions=("interventions", "mean"),
+        fw_passes=("n_forward", "mean"),
+        prefills=("prefills", "mean"),
+        wall_s=("wall_s", "mean"),
+    ).round(1)
+    comp["saved_vs_restart_fw"] = (
+        comp.loc["restart", "fw_passes"] - comp["fw_passes"]
+    ).round(0)
+    print(comp)
+
+    fig, ax = plt.subplots(figsize=(6, 3.2))
+    comp["fw_passes"].plot.bar(
+        ax=ax, color=["gray", "tab:green", "tab:red"]
+    )
+    ax.set_ylabel("mean forward passes / run")
+    ax.set_title("Compute cost by mode (lower = cheaper)")
+    plt.tight_layout()
+    plt.show()
+
+
+def load_results():
+    """Load cached results from the newest ``log/result_*.pkl`` file.
+
+    The file may contain both the single-example result and the full-evaluation
+    DataFrame. The earlier format, which stored only one result, is converted
+    into the current in-memory collection when loaded.
+    """
+    result_paths = list(RESULT_DIR.glob(RESULT_PATTERN))
+    legacy_path = RESULT_DIR / "result.pkl"
+    if not result_paths and legacy_path.exists():
+        result_paths.append(legacy_path)
+    if not result_paths:
+        print(f"No cache found: {RESULT_DIR=}, {RESULT_PATTERN=}")
+        return {}
+    result_path = max(result_paths)
+    print(f"Loading cache: {result_path=}")
+    with result_path.open("rb") as file:
+        saved = pickle.load(file)
+    if "result" in saved:
+        saved = {"single_example": saved}
+    if result_path == legacy_path:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        migrated_path = RESULT_DIR / f"result_{timestamp}.pkl"
+        with migrated_path.open("wb") as file:
+            pickle.dump(saved, file)
+        print(f"Migrated legacy cache: {migrated_path=}")
+    return saved
+
+
+def save_result(results, name, result):
+    """Add one result and save it to a timestamped file in ``log``."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    result_path = RESULT_DIR / f"result_{timestamp}.pkl"
+    results[name] = {
+        "saved_at": timestamp,
+        "result": result,
+    }
+    RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    with result_path.open("wb") as file:
+        pickle.dump(results, file)
+    print(f"Saved result: {name=}, {result_path=}")
+
+
 def main():
     """Run the full evaluation, or one example when requested."""
+    start_time = time.perf_counter()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--single-example",
@@ -146,8 +245,35 @@ def main():
         action="store_true",
         help="use the small model for a quick run",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="show detailed generation and rollback state",
+    )
     args = parser.parse_args()
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(levelname)s: %(message)s",
+    )
+    if args.debug:
+        logging.getLogger("prove").setLevel(logging.DEBUG)
     print(f"Max new tokens: {args.max_new_tokens}")
+
+    result_name = "single_example" if args.single_example else "full_eval"
+    results = load_results()
+    if result_name in results:
+        saved = results[result_name]
+        result = saved["result"]
+        saved_at = saved["saved_at"]
+        print(f"Using cached result: {result_name=}, {saved_at=}")
+        if args.single_example:
+            show_single_result(result, MINIMAL_PAIRS[0])
+        else:
+            show_eval_result(result)
+        total_time = time.perf_counter() - start_time
+        print(f"{total_time=:.1f}")
+        return
+
     model, tokenizer, capture_layer = load_model_runtime(
         PROJECT_CACHE,
         dry_run=args.dry_run,
@@ -174,52 +300,19 @@ def main():
             max_new_tokens=args.max_new_tokens,
             thresh=1.8,
             seed=0,
-            verbose=True,
         )
-        print(f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
-              f"segments={len(res['segments'])}")
-        print(f"forward passes: {res['n_forward']}  "
-              f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s")
-        for event in res["events"]:
-            print("  event:", event)
-        print("\noutcome:", proxy_outcome(res["text"]))
-        print("\n--- final text (tail) ---\n", res["text"][-800:])
-        plot_timeline(res, title=f"{item['id']} / buggy / rollback")
+        save_result(results, result_name, res)
+        show_single_result(res, item)
+        total_time = time.perf_counter() - start_time
+        print(f"{total_time=:.1f}")
         return
 
     # Lowering the threshold below zero guarantees interventions.
     df = run_rollback_eval(max_new_tokens=args.max_new_tokens, thresh=-1.0)
-    print(df.to_string(index=False))
-    print("\nOutcome by variant x mode:")
-    outcome_table = pd.crosstab(
-        [df.variant, df["mode"]], df.outcome
-    ).reindex(
-        columns=["claims_proof", "claims_false", "no_conclusion"],
-        fill_value=0,
-    )
-    print(outcome_table)
-
-    print("\nCompute by mode:")
-    comp = df.groupby("mode").agg(
-        interventions=("interventions", "mean"),
-        fw_passes=("n_forward", "mean"),
-        prefills=("prefills", "mean"),
-        wall_s=("wall_s", "mean"),
-    ).round(1)
-    comp["saved_vs_restart_fw"] = (
-        comp.loc["restart", "fw_passes"] - comp["fw_passes"]
-    ).round(0)
-    print(comp)
-
-
-    fig, ax = plt.subplots(figsize=(6, 3.2))
-    comp["fw_passes"].plot.bar(
-        ax=ax, color=["gray", "tab:green", "tab:red"]
-    )
-    ax.set_ylabel("mean forward passes / run")
-    ax.set_title("Compute cost by mode (lower = cheaper)")
-    plt.tight_layout()
-    plt.show()
+    save_result(results, result_name, df)
+    show_eval_result(df)
+    total_time = time.perf_counter() - start_time
+    print(f"{total_time=:.1f}")
 
 
 if __name__ == "__main__":
