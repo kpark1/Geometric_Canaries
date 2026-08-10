@@ -52,8 +52,7 @@ PROJECT_CACHE = os.path.join(
 )
 # DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
-RESULT_DIR = Path(__file__).parent / "log"
-RESULT_PATTERN = "result_*.pkl"
+FILEDIR = Path(__file__).parent / "log"
 
 """## Dataset — 3 Aeneas-style minimal pairs
 
@@ -116,7 +115,7 @@ data for the geometry analysis.
 
 Entropy (top) and chosen-token logprob (bottom) over the *live* trace. Segment
 boundaries are vertical lines, flagged-then-rolled-back positions are red markers, and
-hint injections show as gaps (hint tokens are forced, so they carry no sampling
+hint injections show as gaps (hint tokens are forced/injected, so they carry no sampling
 entropy).
 """
 
@@ -182,47 +181,43 @@ def show_eval_result(df):
     plt.show()
 
 
-def load_results():
-    """Load cached results from the newest ``log/result_*.pkl`` file.
+def result_path(filedir, timestamp):
+    """Return ``filedir/result_<timestamp>.pkl``."""
+    return Path(filedir) / f"result_{timestamp}.pkl"
+
+
+def load_result(filedir, timestamp):
+    """Load a cached results pickle for the given timestamp.
 
     The file may contain both the single-example result and the full-evaluation
     DataFrame. The earlier format, which stored only one result, is converted
     into the current in-memory collection when loaded.
     """
-    result_paths = list(RESULT_DIR.glob(RESULT_PATTERN))
-    legacy_path = RESULT_DIR / "result.pkl"
-    if not result_paths and legacy_path.exists():
-        result_paths.append(legacy_path)
-    if not result_paths:
-        print(f"No cache found: {RESULT_DIR=}, {RESULT_PATTERN=}")
-        return {}
-    result_path = max(result_paths)
-    print(f"Loading cache: {result_path=}")
-    with result_path.open("rb") as file:
+    path = result_path(filedir, timestamp)
+    if not path.exists():
+        raise FileNotFoundError(f"No cache found: {path}")
+    print(f"Loading cache: {path=}")
+    with path.open("rb") as file:
         saved = pickle.load(file)
     if "result" in saved:
         saved = {"single_example": saved}
-    if result_path == legacy_path:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        migrated_path = RESULT_DIR / f"result_{timestamp}.pkl"
-        with migrated_path.open("wb") as file:
-            pickle.dump(saved, file)
-        print(f"Migrated legacy cache: {migrated_path=}")
     return saved
 
 
-def save_result(results, name, result):
-    """Add one result and save it to a timestamped file in ``log``."""
+def save_result(filedir, results, name, result):
+    """Add one result, write ``result_<timestamp>.pkl``, return the timestamp."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_path = RESULT_DIR / f"result_{timestamp}.pkl"
+    path = result_path(filedir, timestamp)
     results[name] = {
         "saved_at": timestamp,
         "result": result,
     }
-    RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    with result_path.open("wb") as file:
+    Path(filedir).mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as file:
         pickle.dump(results, file)
-    print(f"Saved result: {name=}, {result_path=}")
+    print(f"Saved result: {name=}, {path=}")
+    print(f"Reload later with: --load-saved {timestamp}")
+    return timestamp
 
 
 def main():
@@ -250,6 +245,14 @@ def main():
         action="store_true",
         help="show detailed generation and rollback state",
     )
+    parser.add_argument(
+        "--load-saved",
+        metavar="TIMESTAMP",
+        help=(
+            "load log/result_<TIMESTAMP>.pkl instead of running "
+            "(e.g. 20260803_221329)"
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.WARNING,
@@ -260,12 +263,14 @@ def main():
     print(f"Max new tokens: {args.max_new_tokens}")
 
     result_name = "single_example" if args.single_example else "full_eval"
-    results = load_results()
-    if result_name in results:
+
+    if args.load_saved:
+        results = load_result(FILEDIR, args.load_saved)
         saved = results[result_name]
         result = saved["result"]
         saved_at = saved["saved_at"]
         print(f"Using cached result: {result_name=}, {saved_at=}")
+        print(f'{result=}')
         if args.single_example:
             show_single_result(result, MINIMAL_PAIRS[0])
         else:
@@ -274,6 +279,7 @@ def main():
         print(f"{total_time=:.1f}")
         return
 
+    results = {}
     model, tokenizer, capture_layer = load_model_runtime(
         PROJECT_CACHE,
         dry_run=args.dry_run,
@@ -301,7 +307,7 @@ def main():
             thresh=1.8,
             seed=0,
         )
-        save_result(results, result_name, res)
+        save_result(FILEDIR, results, result_name, res)
         show_single_result(res, item)
         total_time = time.perf_counter() - start_time
         print(f"{total_time=:.1f}")
@@ -309,7 +315,7 @@ def main():
 
     # Lowering the threshold below zero guarantees interventions.
     df = run_rollback_eval(max_new_tokens=args.max_new_tokens, thresh=-1.0)
-    save_result(results, result_name, df)
+    save_result(FILEDIR, results, result_name, df)
     show_eval_result(df)
     total_time = time.perf_counter() - start_time
     print(f"{total_time=:.1f}")

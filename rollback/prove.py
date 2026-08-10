@@ -62,7 +62,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
                     from the prompt (matched-intervention baseline: same
                     detector, no checkpointing)
 
-    A *checkpoint* is just a sequence length: the KV cache up to the start of
+    A *checkpoint* is just a sequence.token_count: the KV cache up to the start of
     the current segment.  Rollback = cache.crop(ck) -- the prompt and the good
     prefix are never recomputed.
 
@@ -107,7 +107,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
         "initial state: prompt_len=%d step=%d ids=%r text=%r "
         "seg_start_tok=%d seg_start_char=%d probe_char=%d",
         prompt_len,
-        state.step,
+        state.token_count,
         state.ids,
         state.text,
         state.seg_start_tok,
@@ -127,10 +127,10 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
         snapshot["score"] = score_segment(snapshot, history)
         return snapshot
 
-    while state.step < max_new_tokens:
+    while state.token_count < max_new_tokens:
         logger.debug(
             "step %d start: ids_len=%d text_len=%d",
-            state.step,
+            state.token_count,
             len(state.ids),
             len(state.text),
         )
@@ -153,7 +153,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
         logger.debug(
             "sampled token: step=%d token_id=%d raw=%r entropy=%r "
             "logprob=%r hidden_shape=%r text_tail=%r",
-            state.step,
+            state.token_count,
             tok,
             tokenizer.convert_ids_to_tokens(tok),
             token.entropy,
@@ -163,7 +163,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
         )
 
         if tok == tokenizer.eos_token_id:
-            logger.debug("EOS reached at step %d", state.step)
+            logger.debug("EOS reached at step %d", state.token_count)
             break
 
         boundary_char = find_boundary(state.text, state.probe_char)
@@ -260,13 +260,13 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
                                     np.nan,
                                     dtype=np.float32,
                                 )
-                                state.add_token(Token.forced(
+                                state.add_token(Token.inject(
                                     token_id=hint_token_id,
                                     hidden=hint_hidden,
                                 ))
 
                             state.decode(tokenizer)
-                            state.seg_start_tok = state.step
+                            state.seg_start_tok = state.token_count
                             state.seg_start_char = len(state.text)
                             state.probe_char = len(state.text)
                             logits = out.logits[0, -1].float()
@@ -288,7 +288,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
                             output_hidden_states=True,
                         )
                         stats.add_forward(1)
-                        state.seg_start_tok = state.step
+                        state.seg_start_tok = state.token_count
                         state.seg_start_char = len(state.text)
                         state.probe_char = len(state.text)
                         logits = out.logits[0, -1].float()
@@ -330,8 +330,8 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
         logits = out.logits[0, -1].float()
         stats.add_forward(1)
 
-    if state.step - state.seg_start_tok > 0:
-        segments.append(close_segment(state.step, len(state.text)))
+    if state.token_count - state.seg_start_tok > 0:
+        segments.append(close_segment(state.token_count, len(state.text)))
 
     entropy = np.array([token.entropy for token in state.tokens])
     logprob = np.array([token.logprob for token in state.tokens])
@@ -368,7 +368,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
         "n_forward": stats.n_forward,
         "n_prefills": stats.n_prefills,
         "gen_tokens": (
-            state.step
+            state.token_count
             + sum(len(branch["ids"]) for branch in stats.abandoned)
         ),
         "wall_s": time.time() - t0,

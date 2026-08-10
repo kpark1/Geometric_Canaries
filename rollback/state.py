@@ -10,17 +10,23 @@ import torch.nn.functional as F
 
 @dataclass
 class Token:
-    """Measurements associated with one generated token."""
+    """Measurements associated with one generated token.
+    entropy: how uncertain the model was across all possible next tokens (including this token)
+    logprob: the log probability to the token that was selected
+    hidden: model's internal vector representation at the selected layer
+    """
+
 
     token_id: int
-    logits: InitVar[torch.Tensor | None]
+    logits: InitVar[torch.Tensor | None] 
     hidden: np.ndarray
 
     entropy: float = field(init=False)
     logprob: float = field(init=False)
 
     def __post_init__(self, logits: torch.Tensor | None) -> None:
-        """Calculate uncertainty measurements from the predictive logits."""
+        """Automatically called for @dataclass after initialization:
+            Calculate uncertainty measurements from the predictive logits."""
         # Force hint tokens use NaN vectors because no sampler selected them.
         if logits is None:
             self.entropy = np.nan
@@ -32,7 +38,7 @@ class Token:
         self.logprob = float(logps[self.token_id])
 
     @classmethod
-    def forced(cls, token_id: int, hidden: np.ndarray) -> "Token":
+    def inject(cls, token_id: int, hidden: np.ndarray) -> "Token":
         """Create an injected token with undefined sampling measurements."""
         return cls(token_id=token_id, logits=None, hidden=hidden)
 
@@ -92,7 +98,12 @@ class Segment:
 
 @dataclass
 class State:
-    """Mutable state for the current surviving generation branch."""
+    """Mutable state for the current surviving generation branch.
+    Token objects
+    → token IDs such as [1847, 374, 264, ...]
+    → tokenizer.decode(...)
+    → readable text
+    """ 
 
     tokens: list[Token] = field(default_factory=list)
     text: str = ""
@@ -107,7 +118,7 @@ class State:
         return [token.token_id for token in self.tokens]
 
     @property
-    def step(self) -> int:
+    def token_count(self) -> int:
         """Return the number of tokens in the current generation."""
         return len(self.tokens)
 
@@ -120,7 +131,7 @@ class State:
         self.text = tokenizer.decode(self.ids, skip_special_tokens=True)
 
     def truncate(self, token_index: int, tokenizer) -> None:
-        """Discard tokens from token_index onward and rebuild decoded text."""
+        """Remove unwanted tokens from token_index onward and rebuild self.text i.e. decoded text from remaining tokens."""
         del self.tokens[token_index:]
         self.decode(tokenizer)
 
