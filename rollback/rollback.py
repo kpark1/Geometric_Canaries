@@ -53,7 +53,7 @@ PROJECT_CACHE = os.path.join(
 # DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 FILEDIR = Path(__file__).parent / "log"
-
+SINGLE_EXAMPLE_INDEX = 1
 """## Dataset — 3 Aeneas-style minimal pairs
 
 Each item is a (fixed, buggy) pair in the Aeneas-faithful Lean subset (`Result` monad,
@@ -134,22 +134,72 @@ believing any of the outcome numbers.
 """
 
 
+def stop_reason_label(stop_reason):
+    """Human-readable explanation of why generation ended."""
+    labels = {
+        "eos": "eos (model emitted end-of-sequence)",
+        "max_new_tokens": "max_new_tokens (hit generation budget)",
+    }
+    return labels.get(stop_reason, str(stop_reason))
+
+
 def show_single_result(res, item):
     """Print and plot one generated proof result."""
     print(f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
           f"segments={len(res['segments'])}")
     print(f"forward passes: {res['n_forward']}  "
           f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s")
+    print(f"stopped: {stop_reason_label(res.get('stop_reason', 'unknown'))}")
     for event in res["events"]:
         print("  event:", event)
     print("\noutcome:", proxy_outcome(res["text"]))
-    print("\n--- final text (tail) ---\n", res["text"][-800:])
+    if res.get("prompt") is not None:
+        print("\n--- prompt ---\n", res["prompt"])
+    print("\n--- final text ---\n", res["text"])
+    print("-" * 50)
     plot_timeline(res, title=f"{item['id']} / buggy / rollback")
 
 
+def show_run_generations(df):
+    """Print the prompt, events, and generated text for every evaluation run."""
+    if "text" not in df.columns:
+        print("\n(no text column in this cache; re-run eval to record generations)")
+        return
+
+    print("\n" + "=" * 50)
+    print("Per-run generations")
+    print("=" * 50)
+    for _, row in df.iterrows():
+        print(
+            f"\n=== {row['id']} / {row['variant']} / {row['mode']} "
+            f"seed={row['seed']} ==="
+        )
+        print(
+            f"outcome={row['outcome']}  interventions={row['interventions']}  "
+            f"gen_tokens={row['gen_tokens']}  wall_s={row['wall_s']:.1f}"
+        )
+        stop_reason = (
+            row["stop_reason"] if "stop_reason" in df.columns else "unknown"
+        )
+        print(f"stopped: {stop_reason_label(stop_reason)}")
+        events = row["events"] if "events" in df.columns else None
+        if isinstance(events, (list, tuple)) and events:
+            for event in events:
+                print("  event:", event)
+        if "prompt" in df.columns and isinstance(row["prompt"], str):
+            print("\n--- prompt ---\n", row["prompt"])
+        print("\n--- final text ---\n", row["text"])
+        print("-" * 50)
+
+
 def show_eval_result(df):
-    """Print and plot the full evaluation DataFrame."""
-    print(df.to_string(index=False))
+    """Print summary tables, then each run's events and final text."""
+    # Keep the comparison table readable when text/prompt are present.
+    summary_cols = [
+        c for c in df.columns
+        if c not in ("text", "prompt", "events")
+    ]
+    print(df[summary_cols].to_string(index=False))
     print("\nOutcome by variant x mode:")
     outcome_table = pd.crosstab(
         [df.variant, df["mode"]], df.outcome
@@ -170,6 +220,8 @@ def show_eval_result(df):
         comp.loc["restart", "fw_passes"] - comp["fw_passes"]
     ).round(0)
     print(comp)
+
+    show_run_generations(df)
 
     fig, ax = plt.subplots(figsize=(6, 3.2))
     comp["fw_passes"].plot.bar(
@@ -216,7 +268,7 @@ def save_result(filedir, results, name, result):
     with path.open("wb") as file:
         pickle.dump(results, file)
     print(f"Saved result: {name=}, {path=}")
-    print(f"Reload later with: --load-saved {timestamp}")
+    print(f"You can reload later with: --load-saved {timestamp}")
     return timestamp
 
 
@@ -232,7 +284,7 @@ def main():
     parser.add_argument(
         "--max-new-tokens",
         type=int,
-        default=512,
+        default=2048,
         help="generation limit per attempt (default: 512)",
     )
     parser.add_argument(
@@ -261,18 +313,22 @@ def main():
     if args.debug:
         logging.getLogger("prove").setLevel(logging.DEBUG)
     print(f"Max new tokens: {args.max_new_tokens}")
-
     result_name = "single_example" if args.single_example else "full_eval"
+    
+    if args.single_example:
+        print(f'{SINGLE_EXAMPLE_INDEX=}')
 
     if args.load_saved:
         results = load_result(FILEDIR, args.load_saved)
         saved = results[result_name]
         result = saved["result"]
+        print(result.keys())
+        exit()
         saved_at = saved["saved_at"]
         print(f"Using cached result: {result_name=}, {saved_at=}")
         print(f'{result=}')
         if args.single_example:
-            show_single_result(result, MINIMAL_PAIRS[0])
+            show_single_result(result, MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX])
         else:
             show_eval_result(result)
         total_time = time.perf_counter() - start_time
@@ -299,7 +355,7 @@ def main():
         prove,
     )
     if args.single_example:
-        item = MINIMAL_PAIRS[0]
+        item = MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]
         res = prove(
             build_prompt(item, "buggy"),
             mode="rollback",
