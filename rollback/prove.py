@@ -15,8 +15,10 @@ from prompt import encode_prompt
 from state import RunStats, State, Token
 from transformers import DynamicCache
 
-HINT = ("\nWait -- let me re-check the last step carefully before continuing. "
-        "I should verify each claim against the definitions.\n")
+HINT = (
+    "\nWait -- let me re-check the last step carefully before continuing. "
+    "I should verify each claim against the definitions.\n"
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +51,27 @@ def _token_index_at_char(
 ) -> int:
     """Map a decoded character boundary to an exclusive token index."""
     for i in range(len(ids)):
-        prefix = tokenizer.decode(ids[:i + 1], skip_special_tokens=True)
+        prefix = tokenizer.decode(ids[: i + 1], skip_special_tokens=True)
         if len(prefix) >= char_index:
             return i + 1
     return len(ids)
 
 
 @torch.no_grad()
-def prove(prompt: str, model: Any, tokenizer: Any, capture_layer: int,
-          mode: str = "rollback", max_new_tokens: int = 2048,
-          max_rollbacks: int = 3, thresh: float = 1.8,
-          temperature: float = 1.0, top_p: float = 0.95,
-          seed: int = 0, inject_hint: bool = False) -> dict[str, Any]:
+def prove(
+    prompt: str,
+    model: Any,
+    tokenizer: Any,
+    capture_layer: int,
+    mode: str = "rollback",
+    max_new_tokens: int = 2048,
+    max_rollbacks: int = 3,
+    thresh: float = 1.8,
+    temperature: float = 1.0,
+    top_p: float = 0.95,
+    seed: int = 0,
+    inject_hint: bool = False,
+) -> dict[str, Any]:
     """One streaming generate-detect-rollback run.
 
     mode:
@@ -148,10 +159,7 @@ def prove(prompt: str, model: Any, tokenizer: Any, capture_layer: int,
 
         tok = _sample(logits.cpu(), temperature, top_p, gen)
         predictive_hidden = (
-            out.hidden_states[capture_layer][0, -1]
-            .float()
-            .cpu()
-            .numpy()
+            out.hidden_states[capture_layer][0, -1].float().cpu().numpy()
         )
         token = Token(
             token_id=tok,
@@ -220,30 +228,32 @@ def prove(prompt: str, model: Any, tokenizer: Any, capture_layer: int,
                 # Should the program reject this segment and perform the
                 # configured intervention?
                 should_intervene = (
-                    flagged
-                    and mode != "plain"
-                    and stats.rollbacks < max_rollbacks
+                    flagged and mode != "plain" and stats.rollbacks < max_rollbacks
                 )
                 if should_intervene:
                     stats.rollbacks += 1
-                    stats.abandoned.append({
-                        "segment_start_tok": segment["tok_start"],
-                        "segment_end_tok": segment["tok_end"],
-                        "text": state.text,
-                        "ids": list(state.ids),
-                        "entropy": [t.entropy for t in state.tokens],
-                        "logprob": [t.logprob for t in state.tokens],
-                    })
+                    stats.abandoned.append(
+                        {
+                            "segment_start_tok": segment["tok_start"],
+                            "segment_end_tok": segment["tok_end"],
+                            "text": state.text,
+                            "ids": list(state.ids),
+                            "entropy": [t.entropy for t in state.tokens],
+                            "logprob": [t.logprob for t in state.tokens],
+                        }
+                    )
 
                     if mode == "rollback":
                         checkpoint = prompt_len + segment["tok_start"]
                         cache.crop(checkpoint)
                         state.truncate(segment["tok_start"], tokenizer)
-                        stats.events.append({
-                            "type": "rollback",
-                            "to_tok": segment["tok_start"],
-                            "score": segment["score"],
-                        })
+                        stats.events.append(
+                            {
+                                "type": "rollback",
+                                "to_tok": segment["tok_start"],
+                                "score": segment["score"],
+                            }
+                        )
 
                         hint_ids = []
                         if inject_hint:
@@ -272,10 +282,12 @@ def prove(prompt: str, model: Any, tokenizer: Any, capture_layer: int,
                                     np.nan,
                                     dtype=np.float32,
                                 )
-                                state.add_token(Token.inject(
-                                    token_id=hint_token_id,
-                                    hidden=hint_hidden,
-                                ))
+                                state.add_token(
+                                    Token.inject(
+                                        token_id=hint_token_id,
+                                        hidden=hint_hidden,
+                                    )
+                                )
 
                             state.decode(tokenizer)
                             state.seg_start_tok = state.token_count
@@ -316,10 +328,12 @@ def prove(prompt: str, model: Any, tokenizer: Any, capture_layer: int,
                         )
                         stats.add_forward(prompt_len)
                         stats.n_prefills += 1
-                        stats.events.append({
-                            "type": "restart",
-                            "score": segment["score"],
-                        })
+                        stats.events.append(
+                            {
+                                "type": "restart",
+                                "score": segment["score"],
+                            }
+                        )
                         logits = out.logits[0, -1].float()
                         state.reset()
                         history.clear()
@@ -381,8 +395,7 @@ def prove(prompt: str, model: Any, tokenizer: Any, capture_layer: int,
         "n_forward": stats.n_forward,
         "n_prefills": stats.n_prefills,
         "gen_tokens": (
-            state.token_count
-            + sum(len(branch["ids"]) for branch in stats.abandoned)
+            state.token_count + sum(len(branch["ids"]) for branch in stats.abandoned)
         ),
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,

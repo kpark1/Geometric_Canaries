@@ -19,42 +19,28 @@ LEAN_MODELS = {
     "binary_search": {
         "bug_type": "progress_bug",
         "real_world_analogue": "loop-progress / midpoint bug family "
-                               "(cf. the JDK Arrays.binarySearch overflow, Bloch 2006)",
+        "(cf. the JDK Arrays.binarySearch overflow, Bloch 2006)",
         "fixed_defn": (
-            rust_comment("binary_search")
-            + load_fixture("binary_search_fixed.lean")
+            rust_comment("binary_search") + load_fixture("binary_search_fixed.lean")
         ),
         "buggy_defn": (
-            rust_comment("binary_search")
-            + load_fixture("binary_search_buggy.lean")
+            rust_comment("binary_search") + load_fixture("binary_search_buggy.lean")
         ),
         "spec": load_fixture("binary_search_spec.lean"),
     },
     "sat_sub": {
         "bug_type": "underflow_panic",
         "real_world_analogue": "integer-underflow panic class "
-                               "(recurring RustSec advisory category)",
-        "fixed_defn": (
-            rust_comment("sat_sub")
-            + load_fixture("sat_sub_fixed.lean")
-        ),
-        "buggy_defn": (
-            rust_comment("sat_sub")
-            + load_fixture("sat_sub_buggy.lean")
-        ),
+        "(recurring RustSec advisory category)",
+        "fixed_defn": (rust_comment("sat_sub") + load_fixture("sat_sub_fixed.lean")),
+        "buggy_defn": (rust_comment("sat_sub") + load_fixture("sat_sub_buggy.lean")),
         "spec": load_fixture("sat_sub_spec.lean"),
     },
     "clamp": {
         "bug_type": "flipped_comparison",
         "real_world_analogue": "comparison-flip logic-error family",
-        "fixed_defn": (
-            rust_comment("clamp")
-            + load_fixture("clamp_fixed.lean")
-        ),
-        "buggy_defn": (
-            rust_comment("clamp")
-            + load_fixture("clamp_buggy.lean")
-        ),
+        "fixed_defn": (rust_comment("clamp") + load_fixture("clamp_fixed.lean")),
+        "buggy_defn": (rust_comment("clamp") + load_fixture("clamp_buggy.lean")),
         "spec": load_fixture("clamp_spec.lean"),
     },
 }
@@ -66,11 +52,16 @@ def build_prompt(
     use_mathlib_header: bool = True,
 ) -> str:
     v = item[variant]
-    code_block = ((DSP_HEADER if use_mathlib_header else "")
-                  + LEAN_PREAMBLE + "\n" + v["defn"] + "\n\n" + v["spec"])
+    code_block = (
+        (DSP_HEADER if use_mathlib_header else "")
+        + LEAN_PREAMBLE
+        + "\n"
+        + v["defn"]
+        + "\n\n"
+        + v["spec"]
+    )
     return (
-        "Complete the following Lean 4 code:\n\n```lean4\n" + code_block
-        + "\n```\n\n"
+        "Complete the following Lean 4 code:\n\n```lean4\n" + code_block + "\n```\n\n"
         "Before producing the Lean 4 code to formally prove the given theorem, "
         "provide a detailed proof plan outlining the main proof steps and "
         "strategies.\n"

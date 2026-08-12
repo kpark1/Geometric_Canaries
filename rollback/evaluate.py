@@ -5,8 +5,11 @@ from typing import Any
 import pandas as pd
 
 CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
-CLAIM_FALSE = re.compile(r"counterexample|statement is false|does not hold"
-                         r"|cannot be proved", re.IGNORECASE)
+CLAIM_FALSE = re.compile(
+    r"counterexample|statement is false|does not hold"
+    r"|cannot be proved",
+    re.IGNORECASE,
+)
 
 
 def proxy_outcome(text: str) -> str:
@@ -40,19 +43,23 @@ def run_eval(
                         thresh=thresh,
                         seed=seed,
                     )
-                    rows.append({
-                        "id": item["id"], "variant": variant,
-                        "provable": item[variant]["provable"],
-                        "mode": mode, "seed": seed,
-                        "outcome": proxy_outcome(result["text"]),
-                        "stop_reason": result["stop_reason"],
-                        "prompt": result.get("prompt", prompt),
-                        "text": result["text"],
-                        "events": result["events"],
-                        "interventions": result["rollbacks"],
-                        "gen_tokens": result["gen_tokens"],
-                        "n_forward": result["n_forward"],
-                        "prefills": result["n_prefills"],
-                        "wall_s": result["wall_s"],
-                    })
+                    rows.append(
+                        {
+                            "id": item["id"],
+                            "variant": variant,
+                            "provable": item[variant]["provable"],
+                            "mode": mode,
+                            "seed": seed,
+                            "outcome": proxy_outcome(result["text"]),
+                            "stop_reason": result["stop_reason"],
+                            "prompt": result.get("prompt", prompt),
+                            "text": result["text"],
+                            "events": result["events"],
+                            "interventions": result["rollbacks"],
+                            "gen_tokens": result["gen_tokens"],
+                            "n_forward": result["n_forward"],
+                            "prefills": result["n_prefills"],
+                            "wall_s": result["wall_s"],
+                        }
+                    )
     return pd.DataFrame(rows)

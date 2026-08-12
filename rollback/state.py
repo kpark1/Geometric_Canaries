@@ -17,9 +17,8 @@ class Token:
     hidden: model's internal vector representation at the selected layer
     """
 
-
     token_id: int
-    logits: InitVar[torch.Tensor | None] 
+    logits: InitVar[torch.Tensor | None]
     hidden: np.ndarray
 
     entropy: float = field(init=False)
@@ -27,7 +26,7 @@ class Token:
 
     def __post_init__(self, logits: torch.Tensor | None) -> None:
         """Automatically called for @dataclass after initialization:
-            Calculate uncertainty measurements from the predictive logits."""
+        Calculate uncertainty measurements from the predictive logits."""
         # Force hint tokens use NaN vectors because no sampler selected them.
         if logits is None:
             self.entropy = np.nan
@@ -51,7 +50,7 @@ class State:
     → token IDs such as [1847, 374, 264, ...]
     → tokenizer.decode(...)
     → readable text
-    """ 
+    """
 
     tokens: list[Token] = field(default_factory=list)
     text: str = ""
@@ -77,8 +76,8 @@ class State:
         lexical_smells: re.Pattern,
     ) -> dict[str, Any]:
         """Calculate a detached record for the current segment."""
-        segment_tokens = self.tokens[self.seg_start_tok:seg_end_tok]
-        segment_text = self.text[self.seg_start_char:seg_end_char]
+        segment_tokens = self.tokens[self.seg_start_tok : seg_end_tok]
+        segment_text = self.text[self.seg_start_char : seg_end_char]
         hidden = [token.hidden for token in segment_tokens]
 
         return {
@@ -87,12 +86,12 @@ class State:
             "char_start": self.seg_start_char,
             "char_end": seg_end_char,
             "text": segment_text,
-            "mean_entropy": float(np.nanmean([
-                token.entropy for token in segment_tokens
-            ])),
-            "min_logprob": float(np.nanmin([
-                token.logprob for token in segment_tokens
-            ])),
+            "mean_entropy": float(
+                np.nanmean([token.entropy for token in segment_tokens])
+            ),
+            "min_logprob": float(
+                np.nanmin([token.logprob for token in segment_tokens])
+            ),
             "centroid": np.stack(hidden).mean(axis=0) if hidden else None,
             "smell": bool(lexical_smells.search(segment_text)),
         }
@@ -110,7 +109,6 @@ class State:
         del self.tokens[token_index:]
         self.decode(tokenizer)
 
-
     def reset(self) -> None:
         """Clear state that should be discarded during a full restart."""
         self.tokens.clear()
@@ -119,6 +117,7 @@ class State:
         self.seg_start_tok = 0
         self.seg_start_char = 0
         self.probe_char = 0
+
 
 @dataclass
 class RunStats:

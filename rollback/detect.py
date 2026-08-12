@@ -20,7 +20,9 @@ MIN_SEGMENT_TOKENS = 8
 # define smells: sorry, admit, ...
 LEXICAL_SMELLS = re.compile(
     r"\bsorry\b|\badmit\b|native_decide|\bobviously\b|\btrivially\b"
-    r"|clearly\s+true|it is easy to see", re.IGNORECASE)
+    r"|clearly\s+true|it is easy to see",
+    re.IGNORECASE,
+)
 
 
 # After every token, the code asks whether a segment boundary has appeared
@@ -33,8 +35,8 @@ def find_boundary(
     if m:
         return m.end()
 
-    nl1 = text.find('\n', from_char + 100)
-    nl2 = text.find('Ċ', from_char + 100)
+    nl1 = text.find("\n", from_char + 100)
+    nl2 = text.find("Ċ", from_char + 100)
     nls = [n for n in (nl1, nl2) if n != -1]
     return min(nls) + 1 if nls else None
 
@@ -51,7 +53,7 @@ def score_segment(
 ) -> float:
     smell_score = 1.5 if seg["smell"] else 0.0
     if len(history) <= warmup:
-        return smell_score + 0.1 # Allow smells to trigger even during warmup
+        return smell_score + 0.1  # Allow smells to trigger even during warmup
 
     ents = np.array([h["mean_entropy"] for h in history])
     z_ent = (seg["mean_entropy"] - ents.mean()) / max(float(ents.std()), 0.25)
@@ -60,8 +62,11 @@ def score_segment(
         run = np.mean(cents, axis=0)
         drifts = np.array([cosine_dist(c, run) for c in cents])
         d = cosine_dist(seg["centroid"], run)
-        z_drift = ((d - drifts.mean()) / max(float(drifts.std()), 0.05)
-                   if len(drifts) > 1 else 0.0)
+        z_drift = (
+            (d - drifts.mean()) / max(float(drifts.std()), 0.05)
+            if len(drifts) > 1
+            else 0.0
+        )
     else:
         z_drift = 0.0
     return 0.5 * z_ent + 0.5 * z_drift + smell_score

@@ -16,9 +16,7 @@ def load_model_runtime(
 
     device_request = device_request.lower()
     if device_request not in {"auto", "cpu", "cuda"}:
-        raise ValueError(
-            "GEOMETRIC_CANARIES_DEVICE must be one of: auto, cpu, cuda"
-        )
+        raise ValueError("GEOMETRIC_CANARIES_DEVICE must be one of: auto, cpu, cuda")
 
     cuda_available = torch.cuda.is_available()
     if device_request == "cuda" and not cuda_available:
@@ -40,18 +38,19 @@ def load_model_runtime(
     print(f"CUDA: {cuda_available}; device: {device_map}; dtype: {model_dtype}")
     if cuda_available:
         properties = torch.cuda.get_device_properties(0)
-        print(f"GPU: {properties.name}, {properties.total_memory/1e9:.1f} GB")
+        print(f"GPU: {properties.name}, {properties.total_memory / 1e9:.1f} GB")
     elif not dry_run:
         print("!! no GPU — set DRY_RUN = True or switch runtime")
 
     if dry_run:
         model_id = "Qwen/Qwen2.5-0.5B-Instruct"
         model = AutoModelForCausalLM.from_pretrained(
-            model_id, dtype=model_dtype, device_map=device_map,
+            model_id,
+            dtype=model_dtype,
+            device_map=device_map,
             cache_dir=huggingface_cache,
         )
     else:
-
         model_id = "deepseek-ai/DeepSeek-Prover-V2-7B"
         bnb = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -67,9 +66,7 @@ def load_model_runtime(
             cache_dir=huggingface_cache,
         )
     model.eval()
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_id, cache_dir=huggingface_cache
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=huggingface_cache)
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token

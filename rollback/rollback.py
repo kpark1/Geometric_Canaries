@@ -65,18 +65,25 @@ the loop is trusted — `prove()` only needs `build_prompt(item, variant)`.
 
 MINIMAL_PAIRS = []
 for name, m in LEAN_MODELS.items():
-    MINIMAL_PAIRS.append({
-        "id": name,
-        "bug_type": m["bug_type"],
-        "provenance": "mutation",
-        "real_world_analogue": m["real_world_analogue"],
-        "fixed": {"defn": m["fixed_defn"], "spec": m["spec"], "provable": True},
-        "buggy": {"defn": m["buggy_defn"], "spec": m["spec"], "provable": False},
-    })
+    MINIMAL_PAIRS.append(
+        {
+            "id": name,
+            "bug_type": m["bug_type"],
+            "provenance": "mutation",
+            "real_world_analogue": m["real_world_analogue"],
+            "fixed": {"defn": m["fixed_defn"], "spec": m["spec"], "provable": True},
+            "buggy": {"defn": m["buggy_defn"], "spec": m["spec"], "provable": False},
+        }
+    )
 
 
-print(f"{len(MINIMAL_PAIRS)} minimal pairs: "
-      + ", ".join(p["id"] for p in MINIMAL_PAIRS))
+pair_ids: list[str] = []
+for pair in MINIMAL_PAIRS:
+    pair_id = pair["id"]
+    assert isinstance(pair_id, str)
+    pair_ids.append(pair_id)
+
+print(f"{len(MINIMAL_PAIRS)} minimal pairs: " + ", ".join(pair_ids))
 
 """## Segmentation and the bad-logic detector
 
@@ -147,10 +154,14 @@ def show_single_result(
     item: dict[str, Any],
 ) -> None:
     """Print and plot one generated proof result."""
-    print(f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
-          f"segments={len(res['segments'])}")
-    print(f"forward passes: {res['n_forward']}  "
-          f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s")
+    print(
+        f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
+        f"segments={len(res['segments'])}"
+    )
+    print(
+        f"forward passes: {res['n_forward']}  "
+        f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s"
+    )
     print(f"stopped: {stop_reason_label(res.get('stop_reason', 'unknown'))}")
     for event in res["events"]:
         print("  event:", event)
@@ -180,9 +191,7 @@ def show_run_generations(df: pd.DataFrame) -> None:
             f"outcome={row['outcome']}  interventions={row['interventions']}  "
             f"gen_tokens={row['gen_tokens']}  wall_s={row['wall_s']:.1f}"
         )
-        stop_reason = (
-            row["stop_reason"] if "stop_reason" in df.columns else "unknown"
-        )
+        stop_reason = row["stop_reason"] if "stop_reason" in df.columns else "unknown"
         print(f"stopped: {stop_reason_label(stop_reason)}")
         events = row["events"] if "events" in df.columns else None
         if isinstance(events, (list, tuple)) and events:
@@ -197,27 +206,26 @@ def show_run_generations(df: pd.DataFrame) -> None:
 def show_eval_result(df: pd.DataFrame) -> None:
     """Print summary tables, then each run's events and final text."""
     # Keep the comparison table readable when text/prompt are present.
-    summary_cols = [
-        c for c in df.columns
-        if c not in ("text", "prompt", "events")
-    ]
+    summary_cols = [c for c in df.columns if c not in ("text", "prompt", "events")]
     print(df[summary_cols].to_string(index=False))
     print("\nOutcome by variant x mode:")
-    outcome_table = pd.crosstab(
-        [df.variant, df["mode"]], df.outcome
-    ).reindex(
+    outcome_table = pd.crosstab([df.variant, df["mode"]], df.outcome).reindex(
         columns=["claims_proof", "claims_false", "no_conclusion"],
         fill_value=0,
     )
     print(outcome_table)
 
     print("\nCompute by mode:")
-    comp = df.groupby("mode").agg(
-        interventions=("interventions", "mean"),
-        fw_passes=("n_forward", "mean"),
-        prefills=("prefills", "mean"),
-        wall_s=("wall_s", "mean"),
-    ).round(1)
+    comp = (
+        df.groupby("mode")
+        .agg(
+            interventions=("interventions", "mean"),
+            fw_passes=("n_forward", "mean"),
+            prefills=("prefills", "mean"),
+            wall_s=("wall_s", "mean"),
+        )
+        .round(1)
+    )
     comp["saved_vs_restart_fw"] = (
         comp.loc["restart", "fw_passes"] - comp["fw_passes"]
     ).round(0)
@@ -226,9 +234,7 @@ def show_eval_result(df: pd.DataFrame) -> None:
     show_run_generations(df)
 
     _, ax = plt.subplots(figsize=(6, 3.2))
-    comp["fw_passes"].plot.bar(
-        ax=ax, color=["gray", "tab:green", "tab:red"]
-    )
+    comp["fw_passes"].plot.bar(ax=ax, color=["gray", "tab:green", "tab:red"])
     ax.set_ylabel("mean forward passes / run")
     ax.set_title("Compute cost by mode (lower = cheaper)")
     plt.tight_layout()
@@ -311,8 +317,7 @@ def main() -> None:
         "--load-saved",
         metavar="TIMESTAMP",
         help=(
-            "load log/result_<TIMESTAMP>.pkl instead of running "
-            "(e.g. 20260803_221329)"
+            "load log/result_<TIMESTAMP>.pkl instead of running (e.g. 20260803_221329)"
         ),
     )
     args = parser.parse_args()
@@ -324,9 +329,9 @@ def main() -> None:
         logging.getLogger("prove").setLevel(logging.DEBUG)
     print(f"Max new tokens: {args.max_new_tokens}")
     result_name = "single_example" if args.single_example else "full_eval"
-    
+
     if args.single_example:
-        print(f'{SINGLE_EXAMPLE_INDEX=}')
+        print(f"{SINGLE_EXAMPLE_INDEX=}")
 
     if args.load_saved:
         results = load_result(FILEDIR, args.load_saved)
