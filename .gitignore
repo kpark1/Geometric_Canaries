@@ -13,3 +13,4 @@ results/
 *.png
 *.csv
 */log/
+*/history.txt
