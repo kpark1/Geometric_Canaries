@@ -23,3 +23,21 @@ not require `bitsandbytes`:
 ```bash
 uv run python rollback/rollback.py --dry-run
 ```
+
+## Development checks
+
+Run linting, formatting validation, and type checking from the repository root:
+
+```bash
+make check
+```
+
+The checks can also be run separately:
+
+```bash
+make lint
+make format-check
+make type-check
+```
+
+These commands check only Python and notebook files tracked by Git.
