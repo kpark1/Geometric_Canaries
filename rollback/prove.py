@@ -7,15 +7,14 @@ import torch.nn.functional as F
 from transformers import DynamicCache
 
 from prompt import encode_prompt
-from segment import (
+from detect import (
     LEXICAL_SMELLS,
     MIN_SEGMENT_TOKENS,
     find_boundary,
     score_segment,
 )
 
-# OLD: from state import Token, State, RunStats
-from state import RunStats, Segment, State, Token  # NEW
+from state import RunStats, State, Token
 
 HINT = ("\nWait -- let me re-check the last step carefully before continuing. "
         "I should verify each claim against the definitions.\n")
@@ -51,7 +50,7 @@ def _token_index_at_char(ids, char_index, tokenizer):
 @torch.no_grad()
 def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
           max_new_tokens=512, max_rollbacks=3, thresh=1.8,
-          temperature=1.0, top_p=0.95, seed=0, inject_hint=True):
+          temperature=1.0, top_p=0.95, seed=0, inject_hint=False):
     """One streaming generate-detect-rollback run.
 
     mode:
@@ -102,6 +101,8 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
     stats = RunStats(n_forward=prompt_len, n_prefills=1)
     history = []
     segments = []
+    # Set on early exit; if the loop ends naturally, generation hit the budget.
+    stop_reason = "max_new_tokens"
 
     logger.debug(
         "initial state: prompt_len=%d step=%d ids=%r text=%r "
@@ -116,16 +117,13 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
     )
 
     def close_segment(seg_end_tok, seg_end_char):
-        segment = Segment(
-            state=state,
-            seg_start_tok=state.seg_start_tok,
+        segment = state.calc_segment(
             seg_end_tok=seg_end_tok,
-            seg_start_char=state.seg_start_char,
             seg_end_char=seg_end_char,
+            lexical_smells=LEXICAL_SMELLS,
         )
-        snapshot = segment.snapshot(lexical_smells=LEXICAL_SMELLS)
-        snapshot["score"] = score_segment(snapshot, history)
-        return snapshot
+        segment["score"] = score_segment(segment, history)
+        return segment
 
     while state.token_count < max_new_tokens:
         logger.debug(
@@ -164,6 +162,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
 
         if tok == tokenizer.eos_token_id:
             logger.debug("EOS reached at step %d", state.token_count)
+            stop_reason = "eos"
             break
 
         boundary_char = find_boundary(state.text, state.probe_char)
@@ -356,6 +355,7 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
 
     return {
         "mode": mode,
+        "prompt": prompt,
         "text": state.text,
         "ids": state.ids,
         "entropy": entropy,
@@ -371,5 +371,6 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
             state.token_count
             + sum(len(branch["ids"]) for branch in stats.abandoned)
         ),
+        "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
     }

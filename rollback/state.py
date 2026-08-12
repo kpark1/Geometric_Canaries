@@ -43,59 +43,6 @@ class Token:
         return cls(token_id=token_id, logits=None, hidden=hidden)
 
 
-@dataclass(frozen=True)
-class Segment:
-    """A bounded view into the tokens and decoded text of a State."""
-
-    state: "State" = field(repr=False)
-    seg_start_tok: int
-    seg_end_tok: int
-    seg_start_char: int
-    seg_end_char: int
-
-    @property
-    def tokens(self) -> list[Token]:
-        """Return the tokens covered by this segment."""
-        return self.state.tokens[self.seg_start_tok:self.seg_end_tok]
-
-    @property
-    def text(self) -> str:
-        """Return the decoded text covered by this segment."""
-        return self.state.text[self.seg_start_char:self.seg_end_char]
-
-    @property
-    def mean_entropy(self) -> float:
-        """Return the mean token entropy within this segment."""
-        return float(np.nanmean([token.entropy for token in self.tokens]))
-
-    @property
-    def min_logprob(self) -> float:
-        """Return the minimum sampled-token log probability."""
-        return float(np.nanmin([token.logprob for token in self.tokens]))
-
-    @property
-    def centroid(self) -> np.ndarray | None:
-        """Return the segment's mean predictive hidden representation."""
-        hidden = [token.hidden for token in self.tokens]
-        return np.stack(hidden).mean(axis=0) if hidden else None
-
-    # OLD: def snapshot(self, idx: int, lexical_smells) -> dict[str, Any]:
-    def snapshot(self, lexical_smells) -> dict[str, Any]:  # NEW
-        """Create an immutable-style record for scoring and history."""
-        return {
-            # REMOVED: "idx": idx,
-            "tok_start": self.seg_start_tok,
-            "tok_end": self.seg_end_tok,
-            "char_start": self.seg_start_char,
-            "char_end": self.seg_end_char,
-            "text": self.text,
-            "mean_entropy": self.mean_entropy,
-            "min_logprob": self.min_logprob,
-            "centroid": self.centroid,
-            "smell": bool(lexical_smells.search(self.text)),
-        }
-
-
 @dataclass
 class State:
     """Mutable state for the current surviving generation branch.
@@ -121,6 +68,33 @@ class State:
     def token_count(self) -> int:
         """Return the number of tokens in the current generation."""
         return len(self.tokens)
+
+    def calc_segment(
+        self,
+        seg_end_tok: int,
+        seg_end_char: int,
+        lexical_smells,
+    ) -> dict[str, Any]:
+        """Calculate a detached record for the current segment."""
+        segment_tokens = self.tokens[self.seg_start_tok:seg_end_tok]
+        segment_text = self.text[self.seg_start_char:seg_end_char]
+        hidden = [token.hidden for token in segment_tokens]
+
+        return {
+            "tok_start": self.seg_start_tok,
+            "tok_end": seg_end_tok,
+            "char_start": self.seg_start_char,
+            "char_end": seg_end_char,
+            "text": segment_text,
+            "mean_entropy": float(np.nanmean([
+                token.entropy for token in segment_tokens
+            ])),
+            "min_logprob": float(np.nanmin([
+                token.logprob for token in segment_tokens
+            ])),
+            "centroid": np.stack(hidden).mean(axis=0) if hidden else None,
+            "smell": bool(lexical_smells.search(segment_text)),
+        }
 
     def add_token(self, token: Token) -> None:
         """Append one generated token to the surviving generation."""
