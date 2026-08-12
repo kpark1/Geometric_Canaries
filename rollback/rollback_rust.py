@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Any
 
-
 FIXTURE_DIR = Path(__file__).parent / "rust_fixtures"
 DSP_HEADER = "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 400000\n\n"
 

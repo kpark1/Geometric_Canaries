@@ -1,5 +1,6 @@
-import numpy as np
 from typing import Any
+
+import numpy as np
 
 
 def plot_timeline(
@@ -8,7 +9,7 @@ def plot_timeline(
 ) -> None:
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(2, 1, figsize=(13, 5.5), sharex=True,
+    _, axes = plt.subplots(2, 1, figsize=(13, 5.5), sharex=True,
                              gridspec_kw={"height_ratios": [2, 1]})
     x = np.arange(len(res["entropy"]))
     axes[0].plot(x, res["entropy"], lw=0.8)

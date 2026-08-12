@@ -29,3 +29,15 @@ torch = [
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
 explicit = true
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.2",
+    "ty>=0.0.70",
+]
+
+[tool.ruff.lint]
+ignore = [
+    "BLE001", # Allow broad exceptions for tokenizer fallback
+    "DTZ005", # Allow timezone-naive local timestamps for result filenames
+]

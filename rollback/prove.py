@@ -5,17 +5,15 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn.functional as F
-from transformers import DynamicCache
-
-from prompt import encode_prompt
 from detect import (
     LEXICAL_SMELLS,
     MIN_SEGMENT_TOKENS,
     find_boundary,
     score_segment,
 )
-
+from prompt import encode_prompt
 from state import RunStats, State, Token
+from transformers import DynamicCache
 
 HINT = ("\nWait -- let me re-check the last step carefully before continuing. "
         "I should verify each claim against the definitions.\n")

@@ -3,7 +3,6 @@ from typing import Any
 
 import numpy as np
 
-
 # Handle both standard newlines and byte-level BPE newlines ('Ċ')
 BOUNDARY_PATTERN = re.compile(
     r"[\nĊ]\s*[\nĊ]"

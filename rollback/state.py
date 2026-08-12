@@ -39,7 +39,7 @@ class Token:
         self.logprob = float(logps[self.token_id])
 
     @classmethod
-    def inject(cls, token_id: int, hidden: np.ndarray) -> "Token":
+    def inject(cls, token_id: int, hidden: np.ndarray) -> Token:
         """Create an injected token with undefined sampling measurements."""
         return cls(token_id=token_id, logits=None, hidden=hidden)
 
