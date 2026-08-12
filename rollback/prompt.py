@@ -1,4 +1,7 @@
-def encode_prompt(prompt, tokenizer):
+from typing import Any
+
+
+def encode_prompt(prompt: str, tokenizer: Any) -> Any:
     """Chat-template the prompt (DSP-V2 is a chat model); fall back to raw."""
     # wrap in the model’s chat format and then converts that entire formatted text into numerical token IDs
     try:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import InitVar, dataclass, field
 from typing import Any
 
@@ -73,7 +74,7 @@ class State:
         self,
         seg_end_tok: int,
         seg_end_char: int,
-        lexical_smells,
+        lexical_smells: re.Pattern,
     ) -> dict[str, Any]:
         """Calculate a detached record for the current segment."""
         segment_tokens = self.tokens[self.seg_start_tok:seg_end_tok]
@@ -100,11 +101,11 @@ class State:
         """Append one generated token to the surviving generation."""
         self.tokens.append(token)
 
-    def decode(self, tokenizer) -> None:
+    def decode(self, tokenizer: Any) -> None:
         """Decode all surviving token IDs into readable text."""
         self.text = tokenizer.decode(self.ids, skip_special_tokens=True)
 
-    def truncate(self, token_index: int, tokenizer) -> None:
+    def truncate(self, token_index: int, tokenizer: Any) -> None:
         """Remove unwanted tokens from token_index onward and rebuild self.text i.e. decoded text from remaining tokens."""
         del self.tokens[token_index:]
         self.decode(tokenizer)

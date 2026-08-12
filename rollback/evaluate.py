@@ -1,4 +1,6 @@
 import re
+from collections.abc import Callable
+from typing import Any
 
 import pandas as pd
 
@@ -8,7 +10,7 @@ CLAIM_FALSE = re.compile(r"counterexample|statement is false|does not hold"
                          r"|cannot be proved", re.IGNORECASE)
 
 
-def proxy_outcome(text):
+def proxy_outcome(text: str) -> str:
     """Stub outcome until Lean verification is wired in."""
     if CLAIM_FALSE.search(text):
         return "claims_false"
@@ -17,9 +19,15 @@ def proxy_outcome(text):
     return "no_conclusion"
 
 
-def run_eval(items, build_prompt_fn, prove_fn,
-             modes=("plain", "rollback", "restart"), seeds=(0, 1),
-             max_new_tokens=384, thresh=1.8):
+def run_eval(
+    items: list[dict[str, Any]],
+    build_prompt_fn: Callable[..., str],
+    prove_fn: Callable[..., dict[str, Any]],
+    modes: list[str] = ["plain", "rollback", "restart"],
+    seeds: list[int] = [0, 1],
+    max_new_tokens: int = 384,
+    thresh: float = 1.8,
+) -> pd.DataFrame:
     rows = []
     for item in items:
         for variant in ("fixed", "buggy"):

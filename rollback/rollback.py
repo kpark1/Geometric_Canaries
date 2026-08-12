@@ -37,6 +37,7 @@ import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -134,7 +135,7 @@ believing any of the outcome numbers.
 """
 
 
-def stop_reason_label(stop_reason):
+def stop_reason_label(stop_reason: str) -> str:
     """Human-readable explanation of why generation ended."""
     labels = {
         "eos": "eos (model emitted end-of-sequence)",
@@ -143,7 +144,10 @@ def stop_reason_label(stop_reason):
     return labels.get(stop_reason, str(stop_reason))
 
 
-def show_single_result(res, item):
+def show_single_result(
+    res: dict[str, Any],
+    item: dict[str, Any],
+) -> None:
     """Print and plot one generated proof result."""
     print(f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
           f"segments={len(res['segments'])}")
@@ -160,7 +164,7 @@ def show_single_result(res, item):
     plot_timeline(res, title=f"{item['id']} / buggy / rollback")
 
 
-def show_run_generations(df):
+def show_run_generations(df: pd.DataFrame) -> None:
     """Print the prompt, events, and generated text for every evaluation run."""
     if "text" not in df.columns:
         print("\n(no text column in this cache; re-run eval to record generations)")
@@ -192,7 +196,7 @@ def show_run_generations(df):
         print("-" * 50)
 
 
-def show_eval_result(df):
+def show_eval_result(df: pd.DataFrame) -> None:
     """Print summary tables, then each run's events and final text."""
     # Keep the comparison table readable when text/prompt are present.
     summary_cols = [
@@ -233,12 +237,15 @@ def show_eval_result(df):
     plt.show()
 
 
-def result_path(filedir, timestamp):
+def result_path(filedir: str | Path, timestamp: str) -> Path:
     """Return ``filedir/result_<timestamp>.pkl``."""
     return Path(filedir) / f"result_{timestamp}.pkl"
 
 
-def load_result(filedir, timestamp):
+def load_result(
+    filedir: str | Path,
+    timestamp: str,
+) -> dict[str, Any]:
     """Load a cached results pickle for the given timestamp.
 
     The file may contain both the single-example result and the full-evaluation
@@ -256,7 +263,12 @@ def load_result(filedir, timestamp):
     return saved
 
 
-def save_result(filedir, results, name, result):
+def save_result(
+    filedir: str | Path,
+    results: dict[str, Any],
+    name: str,
+    result: Any,
+) -> str:
     """Add one result, write ``result_<timestamp>.pkl``, return the timestamp."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = result_path(filedir, timestamp)
@@ -272,7 +284,7 @@ def save_result(filedir, results, name, result):
     return timestamp
 
 
-def main():
+def main() -> None:
     """Run the full evaluation, or one example when requested."""
     start_time = time.perf_counter()
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -285,7 +297,7 @@ def main():
         "--max-new-tokens",
         type=int,
         default=2048,
-        help="generation limit per attempt (default: 512)",
+        help="generation limit per attempt (default: 2048)",
     )
     parser.add_argument(
         "--dry-run",

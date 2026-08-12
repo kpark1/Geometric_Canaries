@@ -1,7 +1,11 @@
 import numpy as np
+from typing import Any
 
 
-def plot_timeline(res, title="CoT signal timeline"):
+def plot_timeline(
+    res: dict[str, Any],
+    title: str = "CoT signal timeline",
+) -> None:
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(2, 1, figsize=(13, 5.5), sharex=True,

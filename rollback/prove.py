@@ -1,5 +1,6 @@
 import logging
 import time
+from typing import Any
 
 import numpy as np
 import torch
@@ -22,7 +23,12 @@ HINT = ("\nWait -- let me re-check the last step carefully before continuing. "
 logger = logging.getLogger(__name__)
 
 
-def _sample(logits, temperature, top_p, gen):
+def _sample(
+    logits: torch.Tensor,
+    temperature: float,
+    top_p: float,
+    gen: torch.Generator,
+) -> int:
     # selects the token with the highest logit if temperature is zero or negative
     if temperature <= 0:
         return int(logits.argmax())
@@ -38,7 +44,11 @@ def _sample(logits, temperature, top_p, gen):
     return int(si[idx])
 
 
-def _token_index_at_char(ids, char_index, tokenizer):
+def _token_index_at_char(
+    ids: list[int],
+    char_index: int,
+    tokenizer: Any,
+) -> int:
     """Map a decoded character boundary to an exclusive token index."""
     for i in range(len(ids)):
         prefix = tokenizer.decode(ids[:i + 1], skip_special_tokens=True)
@@ -48,9 +58,11 @@ def _token_index_at_char(ids, char_index, tokenizer):
 
 
 @torch.no_grad()
-def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
-          max_new_tokens=512, max_rollbacks=3, thresh=1.8,
-          temperature=1.0, top_p=0.95, seed=0, inject_hint=False):
+def prove(prompt: str, model: Any, tokenizer: Any, capture_layer: int,
+          mode: str = "rollback", max_new_tokens: int = 2048,
+          max_rollbacks: int = 3, thresh: float = 1.8,
+          temperature: float = 1.0, top_p: float = 0.95,
+          seed: int = 0, inject_hint: bool = False) -> dict[str, Any]:
     """One streaming generate-detect-rollback run.
 
     mode:
@@ -116,7 +128,10 @@ def prove(prompt, model, tokenizer, capture_layer, mode="rollback",
         state.probe_char,
     )
 
-    def close_segment(seg_end_tok, seg_end_char):
+    def close_segment(
+        seg_end_tok: int,
+        seg_end_char: int,
+    ) -> dict[str, Any]:
         segment = state.calc_segment(
             seg_end_tok=seg_end_tok,
             seg_end_char=seg_end_char,

@@ -1,15 +1,16 @@
 from pathlib import Path
+from typing import Any
 
 
 FIXTURE_DIR = Path(__file__).parent / "rust_fixtures"
 DSP_HEADER = "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 400000\n\n"
 
 
-def load_fixture(filename):
+def load_fixture(filename: str) -> str:
     return (FIXTURE_DIR / filename).read_text().rstrip()
 
 
-def rust_comment(name):
+def rust_comment(name: str) -> str:
     return f"-- Aeneas-style translation of Rust `{name}`\n"
 
 
@@ -60,7 +61,11 @@ LEAN_MODELS = {
 }
 
 
-def build_prompt(item, variant, use_mathlib_header=True):
+def build_prompt(
+    item: dict[str, Any],
+    variant: str,
+    use_mathlib_header: bool = True,
+) -> str:
     v = item[variant]
     code_block = ((DSP_HEADER if use_mathlib_header else "")
                   + LEAN_PREAMBLE + "\n" + v["defn"] + "\n\n" + v["spec"])

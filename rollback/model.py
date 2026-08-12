@@ -1,10 +1,15 @@
 import os
+from typing import Any
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
-def load_model_runtime(project_cache, dry_run=True, device_request="auto"):
+def load_model_runtime(
+    project_cache: str,
+    dry_run: bool = True,
+    device_request: str = "auto",
+) -> tuple[Any, Any, int]:
     os.environ["HF_HOME"] = os.path.join(project_cache, "huggingface")
     os.environ["MPLCONFIGDIR"] = os.path.join(project_cache, "matplotlib")
     huggingface_cache = os.path.join(project_cache, "huggingface", "hub")

@@ -1,4 +1,5 @@
 import re
+from typing import Any
 
 import numpy as np
 
@@ -24,7 +25,11 @@ LEXICAL_SMELLS = re.compile(
 
 
 # After every token, the code asks whether a segment boundary has appeared
-def find_boundary(text, from_char, boundary_pattern=BOUNDARY_PATTERN):
+def find_boundary(
+    text: str,
+    from_char: int,
+    boundary_pattern: re.Pattern = BOUNDARY_PATTERN,
+) -> int | None:
     m = boundary_pattern.search(text, from_char)
     if m:
         return m.end()
@@ -35,12 +40,16 @@ def find_boundary(text, from_char, boundary_pattern=BOUNDARY_PATTERN):
     return min(nls) + 1 if nls else None
 
 
-def cosine_dist(a, b):
+def cosine_dist(a: np.ndarray, b: np.ndarray) -> float:
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
     return 0.0 if na == 0 or nb == 0 else 1.0 - float(a @ b) / (na * nb)
 
 
-def score_segment(seg, history, warmup=0):
+def score_segment(
+    seg: dict[str, Any],
+    history: list[dict[str, Any]],
+    warmup: int = 0,
+) -> float:
     smell_score = 1.5 if seg["smell"] else 0.0
     if len(history) <= warmup:
         return smell_score + 0.1 # Allow smells to trigger even during warmup
