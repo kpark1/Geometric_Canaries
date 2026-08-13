@@ -47,7 +47,7 @@ Two things to know before you run it:
   `lake` and `lean`. The current shell is unaffected; open a new one, or the
   Python code will find the toolchain by absolute path regardless.
 
-Mathlib is pinned by `lean/lean-toolchain` and `lean/lake-manifest.json`, both
+Mathlib is pinned by `lean-project/lean-toolchain` and `lean-project/lake-manifest.json`, both
 committed, so everyone gets byte-identical dependencies. **Do not run
 `lake update`** — it repins Mathlib and rewrites the toolchain file. The setup
 script only runs it if the manifest is missing entirely.

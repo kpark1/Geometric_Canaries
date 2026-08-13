@@ -15,7 +15,7 @@ from rollback_types import (
     ProcessTimeout,
 )
 
-LEAN_PROJECT_DIR = Path(__file__).resolve().parent.parent / "lean"
+LEAN_PROJECT_DIR = Path(__file__).resolve().parent.parent / "lean-project"
 
 # Lean renders the `hasSorry` warning as "declaration uses `<expr>`", where the
 # expression is interpolated, so only this prefix is stable across sorry forms.

@@ -8,7 +8,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LEAN_DIR="$REPO_ROOT/lean"
+# Hyphenated so the directory can never be imported as a Python module and
+# shadow rollback/lean.py.
+LEAN_DIR="$REPO_ROOT/lean-project"
 ELAN_BIN="${ELAN_HOME:-$HOME/.elan}/bin"
 
 for tool in curl git; do
@@ -27,7 +29,7 @@ fi
 
 if ! command -v elan >/dev/null 2>&1 && [ ! -x "$ELAN_BIN/elan" ]; then
     echo "==> Installing elan (Lean toolchain manager)"
-    # --default-toolchain none: the toolchain is chosen by lean/lean-toolchain,
+    # --default-toolchain none: the toolchain is chosen by lean-project/lean-toolchain,
     # so downloading 'stable' here would waste ~2 GB. PATH modification is left
     # enabled on purpose so future shells find lake/lean.
     curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
@@ -43,7 +45,7 @@ export PATH="$ELAN_BIN:$PATH"
 # affect that, so we must actually cd here.
 cd "$LEAN_DIR"
 
-echo "==> Resolving toolchain from lean/lean-toolchain"
+echo "==> Resolving toolchain from lean-project/lean-toolchain"
 lake --version
 
 if [ ! -f "lake-manifest.json" ]; then
