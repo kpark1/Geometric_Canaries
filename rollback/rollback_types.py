@@ -1,10 +1,10 @@
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, TypedDict
-from typing_extensions import Literal
+from typing import Any, Literal, TypedDict
 
 import numpy as np
+
 
 class StopReason(StrEnum):
     EOS = "eos"

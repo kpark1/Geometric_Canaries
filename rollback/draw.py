@@ -1,7 +1,5 @@
-from typing import Any
 
 import numpy as np
-
 from rollback_types import ProveRunResult
 
 

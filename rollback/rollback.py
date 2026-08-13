@@ -44,8 +44,8 @@ from draw import plot_timeline
 from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback_types import NO_PROOF_FOUND, LeanStatus, ProveRunResult
 from rollback_rust import LEAN_MODELS, build_prompt
+from rollback_types import NO_PROOF_FOUND, LeanStatus, ProveRunResult
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
