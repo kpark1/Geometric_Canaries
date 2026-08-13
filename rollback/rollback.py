@@ -41,10 +41,10 @@ from typing import Any
 import matplotlib.pyplot as plt
 import pandas as pd
 from draw import plot_timeline
-from evaluate import proxy_outcome, run_eval
+from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback_types import ProveRunResult
+from rollback_types import NO_PROOF_FOUND, LeanStatus, ProveRunResult
 from rollback_rust import LEAN_MODELS, build_prompt
 
 PROJECT_CACHE = os.path.join(
@@ -166,7 +166,7 @@ def show_single_result(
     print(f"stopped: {stop_reason_label(res.get('stop_reason', 'unknown'))}")
     for event in res["events"]:
         print("  event:", event)
-    print("\noutcome:", proxy_outcome(res["text"]))
+    print("\noutcome:", res["lean_status"])
     if res.get("prompt") is not None:
         print("\n--- prompt ---\n", res["prompt"])
     print("\n--- final text ---\n", res["text"])
@@ -211,7 +211,7 @@ def show_eval_result(df: pd.DataFrame) -> None:
     print(df[summary_cols].to_string(index=False))
     print("\nOutcome by variant x mode:")
     outcome_table = pd.crosstab([df.variant, df["mode"]], df.outcome).reindex(
-        columns=["claims_proof", "claims_false", "no_conclusion"],
+        columns=[member.value for member in LeanStatus] + [NO_PROOF_FOUND],
         fill_value=0,
     )
     print(outcome_table)

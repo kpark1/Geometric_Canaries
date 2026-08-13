@@ -3,7 +3,8 @@ import time
 from typing import Any, TypedDict
 
 import numpy as np
-from rollback_types import ProveRunResult, StopReason
+from lean import DEFAULT_TIMEOUT_S, LeanStatus, extract_lean_deepseek_prover_style, lean_elaborates_no_sorry
+from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
 import torch
 import torch.nn.functional as F
 from detect import (
@@ -72,6 +73,7 @@ def prove(
     top_p: float = 0.95,
     seed: int = 0,
     inject_hint: bool = False,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
 ) -> ProveRunResult:
     """One streaming generate-detect-rollback run.
 
@@ -368,6 +370,8 @@ def prove(
         else np.zeros((0, 1))
     )
 
+    lean_status = _extract_and_check_proof(state.text, timeout_s=timeout_s)
+
     logger.debug(
         "final state: ids_len=%d text_len=%d entropy_len=%d "
         "logprob_len=%d hidden_len=%d segments=%d events=%r rollbacks=%d",
@@ -400,4 +404,13 @@ def prove(
         ),
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
+        "lean_status": lean_status
     }
+
+# TODO: check if the original prompt text is present and unmodified
+def _extract_and_check_proof(text: str, timeout_s: float) -> ResponseLeanStatus:
+    lean_code = extract_lean_deepseek_prover_style(text)
+    if lean_code is None:
+        return "no proof found"
+
+    return lean_elaborates_no_sorry(text, timeout_s=timeout_s)

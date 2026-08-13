@@ -41,3 +41,8 @@ ignore = [
     "BLE001", # Allow broad exceptions for tokenizer fallback
     "DTZ005", # Allow timezone-naive local timestamps for result filenames
 ]
+
+[tool.pyright]
+# rollback/*.py is run as a script, so sys.path[0] is rollback/ at runtime;
+# mirror that here so flat imports (e.g. `from lean import ...`) resolve.
+extraPaths = ["rollback"]

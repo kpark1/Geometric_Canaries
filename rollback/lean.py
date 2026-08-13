@@ -5,15 +5,14 @@ import shutil
 import signal
 import subprocess
 import tempfile
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 from rollback_types import (
+    LeanStatus,
     ProcessResult,
     ProcessResultOrTimeout,
     ProcessTimeout,
-    ProveRunResult,
 )
 
 LEAN_PROJECT_DIR = Path(__file__).resolve().parent.parent / "lean"
@@ -26,20 +25,13 @@ SORRY_MESSAGE_PREFIX = "declaration uses "
 LEAN_BLOCK = re.compile(r"```lean4?[ \t]*\r?\n(.*?)```", re.DOTALL)
 
 
-class LeanStatus(StrEnum):
-    OK = "ok"
-    ERROR = "error"
-    SORRY = "sorry"
-    TIMEOUT = "timeout"
-
-
-def extract_lean_deepseek_prover_style(res: ProveRunResult) -> str | None:
+def extract_lean_deepseek_prover_style(generated_text: str) -> str | None:
     """Pull the final fenced Lean block out of a DeepSeek-Prover-style response.
 
     Returns the last closed block, since the chain-of-thought plan that precedes
     it often contains illustrative snippets.
     """
-    blocks = LEAN_BLOCK.findall(res["text"])
+    blocks = LEAN_BLOCK.findall(generated_text)
     if not blocks:
         return None
     return blocks[-1].strip()

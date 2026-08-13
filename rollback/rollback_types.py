@@ -2,12 +2,25 @@
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, TypedDict
+from typing_extensions import Literal
 
 import numpy as np
 
 class StopReason(StrEnum):
     EOS = "eos"
     MAX_NEW_TOKENS = "max_new_tokens"
+
+
+class LeanStatus(StrEnum):
+    OK = "ok"
+    ERROR = "error"
+    SORRY = "sorry"
+    TIMEOUT = "timeout"
+
+type NoProofFound = Literal["no proof found"]
+type ResponseLeanStatus = LeanStatus | NoProofFound
+NO_PROOF_FOUND: NoProofFound = "no proof found"
+
 
 class ProveRunResult(TypedDict):
     mode: str # TODO
@@ -26,6 +39,7 @@ class ProveRunResult(TypedDict):
     gen_tokens: int
     stop_reason: StopReason
     wall_s: float
+    lean_status: ResponseLeanStatus
 
 
 @dataclass

@@ -52,7 +52,7 @@ def run_eval(
                             "provable": item[variant]["provable"],
                             "mode": mode,
                             "seed": seed,
-                            "outcome": proxy_outcome(result["text"]),
+                            "outcome": result["lean_status"],
                             "stop_reason": result["stop_reason"],
                             "prompt": result.get("prompt", prompt),
                             "text": result["text"],
