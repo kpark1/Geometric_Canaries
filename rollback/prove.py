@@ -409,8 +409,9 @@ def prove(
         ),
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
-        "lean_status": lean_status
+        "lean_status": lean_status,
     }
+
 
 # TODO: check if the original prompt text is present and unmodified
 def _extract_and_check_proof(text: str, timeout_s: float) -> ResponseLeanStatus:

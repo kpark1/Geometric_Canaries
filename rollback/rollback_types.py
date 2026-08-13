@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Literal, TypedDict
@@ -17,22 +16,23 @@ class LeanStatus(StrEnum):
     SORRY = "sorry"
     TIMEOUT = "timeout"
 
+
 type NoProofFound = Literal["no proof found"]
 type ResponseLeanStatus = LeanStatus | NoProofFound
 NO_PROOF_FOUND: NoProofFound = "no proof found"
 
 
 class ProveRunResult(TypedDict):
-    mode: str # TODO
+    mode: str  # TODO
     prompt: str
     text: str
     ids: list[int]
-    entropy: np.ndarray # TODO
-    logprob: np.ndarray # TODO
-    hidden: Any # TODO
+    entropy: np.ndarray  # TODO
+    logprob: np.ndarray  # TODO
+    hidden: Any  # TODO
     segments: list
-    events: list[dict[str, Any]] # TODO
-    abandoned: list[dict[str, Any]] # TODO
+    events: list[dict[str, Any]]  # TODO
+    abandoned: list[dict[str, Any]]  # TODO
     rollbacks: int
     n_forward: int
     n_prefills: int
@@ -47,7 +47,10 @@ class ProcessResult:
     exit_code: int
     stdout: str
 
+
 @dataclass
-class ProcessTimeout: pass
+class ProcessTimeout:
+    pass
+
 
 type ProcessResultOrTimeout = ProcessResult | ProcessTimeout
