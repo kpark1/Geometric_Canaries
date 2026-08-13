@@ -2,9 +2,11 @@ from typing import Any
 
 import numpy as np
 
+from rollback.types import ProveRunResult
+
 
 def plot_timeline(
-    res: dict[str, Any],
+    res: ProveRunResult,
     title: str = "CoT signal timeline",
 ) -> None:
     import matplotlib.pyplot as plt

@@ -1,8 +1,9 @@
 import logging
 import time
-from typing import Any
+from typing import Any, TypedDict
 
 import numpy as np
+from rollback.types import ProveRunResult
 import torch
 import torch.nn.functional as F
 from detect import (
@@ -71,7 +72,7 @@ def prove(
     top_p: float = 0.95,
     seed: int = 0,
     inject_hint: bool = False,
-) -> dict[str, Any]:
+) -> ProveRunResult:
     """One streaming generate-detect-rollback run.
 
     mode:

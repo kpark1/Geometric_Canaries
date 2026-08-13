@@ -44,6 +44,7 @@ from draw import plot_timeline
 from evaluate import proxy_outcome, run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
+from rollback.types import ProveRunResult
 from rollback_rust import LEAN_MODELS, build_prompt
 
 PROJECT_CACHE = os.path.join(
@@ -150,7 +151,7 @@ def stop_reason_label(stop_reason: str) -> str:
 
 
 def show_single_result(
-    res: dict[str, Any],
+    res: ProveRunResult,
     item: dict[str, Any],
 ) -> None:
     """Print and plot one generated proof result."""

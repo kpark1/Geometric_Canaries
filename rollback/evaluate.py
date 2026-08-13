@@ -4,6 +4,8 @@ from typing import Any
 
 import pandas as pd
 
+from rollback.types import ProveRunResult
+
 CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
 CLAIM_FALSE = re.compile(
     r"counterexample|statement is false|does not hold"
@@ -24,7 +26,7 @@ def proxy_outcome(text: str) -> str:
 def run_eval(
     items: list[dict[str, Any]],
     build_prompt_fn: Callable[..., str],
-    prove_fn: Callable[..., dict[str, Any]],
+    prove_fn: Callable[..., ProveRunResult],
     modes: tuple[str, ...] = ("plain", "rollback", "restart"),
     seeds: tuple[int, ...] = (0, 1),
     max_new_tokens: int = 384,
