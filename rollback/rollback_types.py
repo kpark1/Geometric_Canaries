@@ -1,8 +1,13 @@
 
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, TypedDict
 
 import numpy as np
 
+class StopReason(StrEnum):
+    EOS = "eos"
+    MAX_NEW_TOKENS = "max_new_tokens"
 
 class ProveRunResult(TypedDict):
     mode: str # TODO
@@ -19,5 +24,16 @@ class ProveRunResult(TypedDict):
     n_forward: int
     n_prefills: int
     gen_tokens: int
-    stop_reason: str # TODO
+    stop_reason: StopReason
     wall_s: float
+
+
+@dataclass
+class ProcessResult:
+    exit_code: int
+    stdout: str
+
+@dataclass
+class ProcessTimeout: pass
+
+type ProcessResultOrTimeout = ProcessResult | ProcessTimeout

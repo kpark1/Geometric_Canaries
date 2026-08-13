@@ -3,7 +3,7 @@ import time
 from typing import Any, TypedDict
 
 import numpy as np
-from rollback_types import ProveRunResult
+from rollback_types import ProveRunResult, StopReason
 import torch
 import torch.nn.functional as F
 from detect import (
@@ -124,7 +124,7 @@ def prove(
     history = []
     segments = []
     # Set on early exit; if the loop ends naturally, generation hit the budget.
-    stop_reason = "max_new_tokens"
+    stop_reason = StopReason.MAX_NEW_TOKENS
 
     logger.debug(
         "initial state: prompt_len=%d step=%d ids=%r text=%r "
@@ -184,7 +184,7 @@ def prove(
 
         if tok == tokenizer.eos_token_id:
             logger.debug("EOS reached at step %d", state.token_count)
-            stop_reason = "eos"
+            stop_reason = StopReason.EOS
             break
 
         boundary_char = find_boundary(state.text, state.probe_char)
