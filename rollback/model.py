@@ -10,9 +10,9 @@ def load_model_runtime(
     dry_run: bool = True,
     device_request: str = "auto",
 ) -> tuple[Any, Any, int]:
-    os.environ["HF_HOME"] = os.path.join(project_cache, "huggingface")
+    os.environ.setdefault("HF_HOME", os.path.join(project_cache, "huggingface"))
     os.environ["MPLCONFIGDIR"] = os.path.join(project_cache, "matplotlib")
-    huggingface_cache = os.path.join(project_cache, "huggingface", "hub")
+    huggingface_cache = os.path.join(os.environ["HF_HOME"], "hub")
 
     device_request = device_request.lower()
     if device_request not in {"auto", "cpu", "cuda"}:
