@@ -3,7 +3,7 @@ import time
 from typing import Any, TypedDict
 
 import numpy as np
-from rollback.types import ProveRunResult
+from rollback_types import ProveRunResult
 import torch
 import torch.nn.functional as F
 from detect import (

@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from rollback.types import ProveRunResult
+from rollback_types import ProveRunResult
 
 CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
 CLAIM_FALSE = re.compile(

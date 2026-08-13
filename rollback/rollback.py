@@ -44,7 +44,7 @@ from draw import plot_timeline
 from evaluate import proxy_outcome, run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback.types import ProveRunResult
+from rollback_types import ProveRunResult
 from rollback_rust import LEAN_MODELS, build_prompt
 
 PROJECT_CACHE = os.path.join(

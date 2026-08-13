@@ -2,7 +2,7 @@ from typing import Any
 
 import numpy as np
 
-from rollback.types import ProveRunResult
+from rollback_types import ProveRunResult
 
 
 def plot_timeline(
