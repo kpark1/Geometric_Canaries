@@ -418,5 +418,4 @@ def _extract_and_check_proof(text: str, timeout_s: float) -> ResponseLeanStatus:
     lean_code = extract_lean_deepseek_prover_style(text)
     if lean_code is None:
         return "no proof found"
-
-    return lean_elaborates_no_sorry(text, timeout_s=timeout_s)
+    return lean_elaborates_no_sorry(lean_code, timeout_s=timeout_s)
