@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.swp
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+
+# Local model and experiment artifacts
+.cache/
+outputs/
+results/
+*.png
+*.csv
+*/log/
+*/history.txt
