@@ -12,8 +12,15 @@ from detect import (
     score_segment,
 )
 from prompt import encode_prompt
+from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
 from state import RunStats, State, Token
 from transformers import DynamicCache
+
+from lean import (
+    DEFAULT_TIMEOUT_S,
+    extract_lean_deepseek_prover_style,
+    lean_elaborates_no_sorry,
+)
 
 HINT = (
     "\nWait -- let me re-check the last step carefully before continuing. "
@@ -71,7 +78,8 @@ def prove(
     top_p: float = 0.95,
     seed: int = 0,
     inject_hint: bool = False,
-) -> dict[str, Any]:
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+) -> ProveRunResult:
     """One streaming generate-detect-rollback run.
 
     mode:
@@ -123,7 +131,7 @@ def prove(
     history = []
     segments = []
     # Set on early exit; if the loop ends naturally, generation hit the budget.
-    stop_reason = "max_new_tokens"
+    stop_reason = StopReason.MAX_NEW_TOKENS
 
     logger.debug(
         "initial state: prompt_len=%d step=%d ids=%r text=%r "
@@ -183,7 +191,7 @@ def prove(
 
         if tok == tokenizer.eos_token_id:
             logger.debug("EOS reached at step %d", state.token_count)
-            stop_reason = "eos"
+            stop_reason = StopReason.EOS
             break
 
         boundary_char = find_boundary(state.text, state.probe_char)
@@ -367,6 +375,8 @@ def prove(
         else np.zeros((0, 1))
     )
 
+    lean_status = _extract_and_check_proof(state.text, timeout_s=timeout_s)
+
     logger.debug(
         "final state: ids_len=%d text_len=%d entropy_len=%d "
         "logprob_len=%d hidden_len=%d segments=%d events=%r rollbacks=%d",
@@ -399,4 +409,13 @@ def prove(
         ),
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
+        "lean_status": lean_status,
     }
+
+
+# TODO: check if the original prompt text is present and unmodified
+def _extract_and_check_proof(text: str, timeout_s: float) -> ResponseLeanStatus:
+    lean_code = extract_lean_deepseek_prover_style(text)
+    if lean_code is None:
+        return "no proof found"
+    return lean_elaborates_no_sorry(lean_code, timeout_s=timeout_s)

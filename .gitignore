@@ -6,6 +6,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Lean toolchain build artifacts and vendored Mathlib source
+lean-project/.lake/
+
 # Local model and experiment artifacts
 .cache/
 outputs/

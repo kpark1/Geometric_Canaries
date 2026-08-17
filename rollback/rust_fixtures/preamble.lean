@@ -23,6 +23,6 @@ def U32.mul (a b : Nat) : Result Nat :=
 
 /-- Fallible indexing: out-of-bounds is a panic (`.fail`). -/
 def List.index (l : List α) (i : Nat) : Result α :=
-  match l.get? i with
+  match l[i]? with
   | some v => .ok v
   | none => .fail
