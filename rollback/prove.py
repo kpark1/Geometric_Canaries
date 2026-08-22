@@ -8,19 +8,19 @@ import torch.nn.functional as F
 from detect import (
     LEXICAL_SMELLS,
     MIN_SEGMENT_TOKENS,
+    Canary,
     find_boundary,
-    score_segment,
+    resolve_canary,
 )
-from prompt import encode_prompt
-from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
-from state import RunStats, State, Token
-from transformers import DynamicCache
-
 from lean import (
     DEFAULT_TIMEOUT_S,
     extract_lean_deepseek_prover_style,
     lean_elaborates_no_sorry,
 )
+from prompt import encode_prompt
+from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
+from state import RunStats, State, Token
+from transformers import DynamicCache
 
 HINT = (
     "\nWait -- let me re-check the last step carefully before continuing. "
@@ -71,6 +71,7 @@ def prove(
     tokenizer: Any,
     capture_layer: int,
     mode: str = "rollback",
+    canary: str | Canary = "smell",
     max_new_tokens: int = 2048,
     max_rollbacks: int = 3,
     thresh: float = 1.8,
@@ -89,6 +90,9 @@ def prove(
       'restart'  -- on a flagged segment, throw everything away and resample
                     from the prompt (matched-intervention baseline: same
                     detector, no checkpointing)
+
+    canary: name of a registered signal in `detect.CANARIES` (or a callable
+      matching `detect.Canary`) used to score each closed segment.
 
     A *checkpoint* is just a sequence.token_count: the KV cache up to the start of
     the current segment.  Rollback = cache.crop(ck) -- the prompt and the good
@@ -113,6 +117,7 @@ def prove(
                         └── yes → roll back and regenerate
     """
     t0 = time.time()
+    canary_name, canary_fn = resolve_canary(canary)
     gen = torch.Generator(device="cpu").manual_seed(seed)
     input_ids = encode_prompt(prompt, tokenizer).to(model.device)
     prompt_len = input_ids.shape[1]
@@ -154,7 +159,7 @@ def prove(
             seg_end_char=seg_end_char,
             lexical_smells=LEXICAL_SMELLS,
         )
-        segment["score"] = score_segment(segment, history)
+        segment["score"] = canary_fn(segment, history)
         return segment
 
     while state.token_count < max_new_tokens:
@@ -392,6 +397,7 @@ def prove(
 
     return {
         "mode": mode,
+        "canary": canary_name,
         "prompt": prompt,
         "text": state.text,
         "ids": state.ids,

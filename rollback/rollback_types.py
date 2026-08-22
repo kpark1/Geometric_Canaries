@@ -24,6 +24,7 @@ NO_PROOF_FOUND: NoProofFound = "no proof found"
 
 class ProveRunResult(TypedDict):
     mode: str  # TODO
+    canary: str
     prompt: str
     text: str
     ids: list[int]
