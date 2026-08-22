@@ -1,5 +1,5 @@
 import re
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -46,11 +46,27 @@ def cosine_dist(a: np.ndarray, b: np.ndarray) -> float:
     return 0.0 if na == 0 or nb == 0 else 1.0 - float(a @ b) / (na * nb)
 
 
-def score_segment(
+class Canary(Protocol):
+    """A signal that scores a closed segment for how strongly it should be distrusted.
+
+    Higher scores mean more suspicious; `prove()` flags a segment for intervention
+    when a canary's score clears its `thresh`.
+    """
+
+    def __call__(
+        self,
+        seg: dict[str, Any],
+        history: list[dict[str, Any]],
+        warmup: int = 0,
+    ) -> float: ...
+
+
+def smell_canary(
     seg: dict[str, Any],
     history: list[dict[str, Any]],
     warmup: int = 0,
 ) -> float:
+    """Score a segment from lexical smells plus entropy/embedding drift vs. history."""
     smell_score = 1.5 if seg["smell"] else 0.0
     if len(history) <= warmup:
         return smell_score + 0.1  # Allow smells to trigger even during warmup
@@ -70,3 +86,26 @@ def score_segment(
     else:
         z_drift = 0.0
     return 0.5 * z_ent + 0.5 * z_drift + smell_score
+
+
+# Canaries selectable by the pipeline, keyed by the name passed to `prove(canary=...)`.
+# Future issues add entries here (e.g. "mistake_count", "angle_error").
+CANARIES: dict[str, Canary] = {
+    "smell": smell_canary,
+}
+
+
+def get_canary(name: str) -> Canary:
+    try:
+        return CANARIES[name]
+    except KeyError:
+        raise ValueError(
+            f"unknown canary {name!r}; available: {sorted(CANARIES)}"
+        ) from None
+
+
+def resolve_canary(canary: str | Canary) -> tuple[str, Canary]:
+    """Resolve a registered name or a caller-supplied callable to (name, callable)."""
+    if isinstance(canary, str):
+        return canary, get_canary(canary)
+    return getattr(canary, "__name__", repr(canary)), canary
