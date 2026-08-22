@@ -30,6 +30,7 @@ def run_eval(
     seeds: tuple[int, ...] = (0, 1),
     max_new_tokens: int = 384,
     thresh: float = 1.8,
+    canary: str = "smell",
 ) -> pd.DataFrame:
     rows = []
     for item in items:
@@ -40,6 +41,7 @@ def run_eval(
                     result = prove_fn(
                         prompt,
                         mode=mode,
+                        canary=canary,
                         max_new_tokens=max_new_tokens,
                         thresh=thresh,
                         seed=seed,
@@ -50,6 +52,7 @@ def run_eval(
                             "variant": variant,
                             "provable": item[variant]["provable"],
                             "mode": mode,
+                            "canary": result["canary"],
                             "seed": seed,
                             "outcome": result["lean_status"],
                             "stop_reason": result["stop_reason"],
