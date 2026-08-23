@@ -5,13 +5,24 @@ from detect import (
     CANARIES,
     average_angle_error_canary,
     get_canary,
+    number_of_mistakes_canary,
     resolve_canary,
     smell_canary,
 )
 
 
-def make_segment(smell: bool = False, mean_entropy: float = 1.0, centroid=None):
-    return {"smell": smell, "mean_entropy": mean_entropy, "centroid": centroid}
+def make_segment(
+    smell: bool = False,
+    mean_entropy: float = 1.0,
+    centroid=None,
+    text: str = "",
+):
+    return {
+        "smell": smell,
+        "mean_entropy": mean_entropy,
+        "centroid": centroid,
+        "text": text,
+    }
 
 
 def make_history_entry(mean_entropy: float, centroid=None):
@@ -24,6 +35,9 @@ class TestCanaryRegistry:
 
     def test_aae_is_registered(self):
         assert CANARIES["aae"] is average_angle_error_canary
+
+    def test_nom_is_registered(self):
+        assert CANARIES["nom"] is number_of_mistakes_canary
 
     def test_get_canary_returns_registered_callable(self):
         assert get_canary("smell") is smell_canary
@@ -177,6 +191,99 @@ class TestAverageAngleErrorCanary:
         ]
         score = average_angle_error_canary(make_segment(centroid=None), history)
         assert score == pytest.approx(0.0)
+
+
+def mixed_jump_history():
+    """Four segments whose consecutive centroids drift a little, not a lot --
+    enough for number_of_mistakes_canary's jump-percentile threshold to sit
+    above zero, so "small jump" and "big jump" test cases are unambiguous."""
+    return [
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0])),
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.1])),
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, -0.1])),
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.1])),
+    ]
+
+
+class TestNumberOfMistakesCanary:
+    def test_no_marker_scores_zero_even_with_a_jump(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(centroid=np.array([0.0, 1.0]), text="so we conclude x=1"),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_marker_without_a_jump_scores_zero(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([1.0, 0.1]),  # same direction as the last centroid
+                text="wait, let's double check",
+            ),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_marker_with_a_jump_scores_one(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([0.0, 1.0]),  # sharply off the run's direction
+                text="wait, that's not right",
+            ),
+            history,
+        )
+        assert score == pytest.approx(1.0)
+
+    def test_respects_warmup_parameter(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(centroid=np.array([0.0, 1.0]), text="wait, that's not right"),
+            history,
+            warmup=len(history),
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_missing_centroid_scores_zero(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(centroid=None, text="wait, that's not right"), history
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_no_jump_distribution_yet_scores_zero(self):
+        history = [make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0]))]
+        score = number_of_mistakes_canary(
+            make_segment(centroid=np.array([0.0, 1.0]), text="wait, that's not right"),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_generic_discourse_connectives_are_not_markers(self):
+        """ "However"/"instead" are excluded on purpose -- see BACKTRACK_MARKERS."""
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([0.0, 1.0]),
+                text="However, instead of that approach, we try another way",
+            ),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_explicit_error_specific_phrase_is_a_mistake(self):
+        """ "sign error" isn't in the grounded research list -- it's from the
+        explicit tier in backtrack_markers.yaml, specific enough to be low-noise."""
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([0.0, 1.0]),
+                text="that's a sign error in the last step",
+            ),
+            history,
+        )
+        assert score == pytest.approx(1.0)
 
 
 class TestBacktrackMarkers:

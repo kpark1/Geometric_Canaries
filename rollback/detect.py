@@ -1,4 +1,5 @@
 import re
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -141,11 +142,46 @@ def average_angle_error_canary(
     return float(np.arccos(max(-1.0, min(1.0, cosine))))
 
 
+def number_of_mistakes_canary(
+    seg: dict[str, Any],
+    history: list[dict[str, Any]],
+    warmup: int = 0,
+    jump_percentile: float = 75.0,
+) -> float:
+    """1.0 if this segment both names a caught mistake and jumps embedding-wise.
+
+    Ported from geocanary/geometry/metrics.py (PR #1): a segment counts as a
+    caught mistake only when a backtrack marker co-occurs with a centroid jump
+    large relative to the run so far -- requiring both avoids counting a
+    reflection word with no real pivot behind it.
+    """
+    if len(history) <= warmup or not BACKTRACK_MARKERS.search(seg["text"]):
+        return 0.0
+
+    prev_centroid = next(
+        (h["centroid"] for h in reversed(history) if h["centroid"] is not None),
+        None,
+    )
+    if prev_centroid is None or seg["centroid"] is None:
+        return 0.0
+
+    dists = [
+        cosine_dist(a["centroid"], b["centroid"])
+        for a, b in pairwise(history)
+        if a["centroid"] is not None and b["centroid"] is not None
+    ]
+    jump = cosine_dist(seg["centroid"], prev_centroid)
+    if not dists:
+        return 0.0
+
+    return 1.0 if jump >= float(np.percentile(dists, jump_percentile)) else 0.0
+
+
 # Canaries selectable by the pipeline, keyed by the name passed to `prove(canary=...)`.
-# Future issues add entries here (e.g. "mistake_count").
 CANARIES: dict[str, Canary] = {
     "smell": smell_canary,
     "aae": average_angle_error_canary,
+    "nom": number_of_mistakes_canary,
 }
 
 
