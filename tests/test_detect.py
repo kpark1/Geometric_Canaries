@@ -302,6 +302,12 @@ class TestBacktrackMarkers:
     def test_matches_known_markers(self, text):
         assert BACKTRACK_MARKERS.search(text)
 
+    def test_punctuation_terminated_marker_matches(self):
+        # regression: a marker ending in a non-word char (":") needs a
+        # non-word lookaround, not \b -- \b would require a word character
+        # right after the colon, which never happens before whitespace/EOF
+        assert BACKTRACK_MARKERS.search("Correction: that step was wrong.")
+
     @pytest.mark.parametrize(
         "text",
         [
