@@ -1,25 +1,8 @@
-import re
 from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
 from rollback_types import ProveRunResult
-
-CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
-CLAIM_FALSE = re.compile(
-    r"counterexample|statement is false|does not hold"
-    r"|cannot be proved",
-    re.IGNORECASE,
-)
-
-
-def proxy_outcome(text: str) -> str:
-    """Stub outcome until Lean verification is wired in."""
-    if CLAIM_FALSE.search(text):
-        return "claims_false"
-    if CLAIM_PROOF.search(text):
-        return "claims_proof"
-    return "no_conclusion"
 
 
 def run_eval(
