@@ -1,0 +1,64 @@
+# Backtrack markers for detect.py's number_of_mistakes_canary: phrases that
+# signal a recognised, self-corrected error mid-reasoning.
+#
+# grounded: drawn from published reasoning-trace research, not hand-picked.
+#   - "wait" is causally shown to trigger self-correction on math reasoning
+#     (Muennighoff et al., "s1: Simple Test-Time Scaling", arXiv:2501.19393 --
+#     forcing "Wait" beat "Hmm" and no-extrapolation on AIME24).
+#   - the rest are drawn from the empirically frequent reflection markers in
+#     Table 1 of "Revisiting Anthropomorphic Reflection Markers in LLM
+#     Reasoning" (arXiv:2605.28305), restricted to entries specific enough to
+#     use as a plain substring match -- that paper's full list also includes
+#     generic function words ("I", "we", "try", "let", "using", "again",
+#     "maybe", "consider", ...) that are too common in ordinary proof prose
+#     to serve as a useful signal here.
+grounded:
+  - wait
+  - alternatively
+  - hmm
+  - umm
+  - oh
+  - oops
+  - aha
+
+# explicit: not backed by either paper above, but specific and unambiguous
+# enough to be low-noise -- they name a caught mistake, an interruption, or a
+# restart directly rather than just signalling hesitation. Deliberately
+# excludes generic discourse connectives ("however", "instead", bare
+# "actually", bare "no", bare "error" -- proofs talk about "error bounds" and
+# "error terms" all the time) that show up constantly in ordinary proof prose
+# for reasons unrelated to a mistake.
+explicit:
+  # naming the mistake
+  - "mistake"
+  - "made a mistake"
+  - "made an error"
+  - "an error"
+  - "miscalculated"
+  - "miscalculation"
+  - "that's wrong"
+  - "that is wrong"
+  - "that's incorrect"
+  - "that is incorrect"
+  - "that's not right"
+  - "that is not right"
+  - "this isn't right"
+  - "this is not right"
+  - "that can't be right"
+  - "that cannot be right"
+  # interrupting to go back
+  - "hold on"
+  - "hang on"
+  - "wait a second"
+  - "wait a minute"
+  - "on second thought"
+  - "actually, no"
+  - "actually, wait"
+  # redoing the step
+  - "scratch that"
+  - "start over"
+  - "let's start over"
+  - "let me correct"
+  - "let me fix"
+  - "correction:"
+  - "let me re" # prefix: reconsider/recheck/redo/recompute/rewrite
