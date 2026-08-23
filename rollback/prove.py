@@ -56,12 +56,22 @@ def _token_index_at_char(
     char_index: int,
     tokenizer: Any,
 ) -> int:
-    """Map a decoded character boundary to an exclusive token index."""
-    for i in range(len(ids)):
-        prefix = tokenizer.decode(ids[: i + 1], skip_special_tokens=True)
-        if len(prefix) >= char_index:
-            return i + 1
-    return len(ids)
+    """Map a decoded character boundary to an exclusive token index.
+
+    Binary search: decoded length is monotonic in prefix length, so this
+    needs O(log n) decode calls instead of a linear scan that re-decodes the
+    whole growing prefix at every step (O(n) decode calls, each themselves
+    O(n) -- quadratic overall).
+    """
+    lo, hi = 0, len(ids)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        prefix_len = len(tokenizer.decode(ids[: mid + 1], skip_special_tokens=True))
+        if prefix_len >= char_index:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo + 1 if lo < len(ids) else len(ids)
 
 
 @torch.no_grad()
