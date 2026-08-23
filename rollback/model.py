@@ -30,6 +30,13 @@ def load_model_runtime(
         else ("auto" if device_request == "auto" and cuda_available else "cpu")
     )
     use_cuda = device_map != "cpu"
+    if not use_cuda and not dry_run:
+        raise RuntimeError(
+            "No GPU detected. Re-run with --dry-run for the CPU-friendly path, "
+            "or install CUDA and the gpu extra (`uv sync --extra gpu`) to run "
+            "the full 4-bit DeepSeek-Prover model -- it requires CUDA and would "
+            "otherwise fail only after downloading the full checkpoint."
+        )
     model_dtype = (
         torch.bfloat16
         if use_cuda and torch.cuda.is_bf16_supported()
@@ -39,8 +46,6 @@ def load_model_runtime(
     if cuda_available:
         properties = torch.cuda.get_device_properties(0)
         print(f"GPU: {properties.name}, {properties.total_memory / 1e9:.1f} GB")
-    elif not dry_run:
-        print("!! no GPU — set DRY_RUN = True or switch runtime")
 
     if dry_run:
         model_id = "Qwen/Qwen2.5-0.5B-Instruct"
