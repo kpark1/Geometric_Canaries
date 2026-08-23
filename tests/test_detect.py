@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from detect import (
+    BACKTRACK_MARKERS,
     CANARIES,
     average_angle_error_canary,
     get_canary,
@@ -176,3 +177,32 @@ class TestAverageAngleErrorCanary:
         ]
         score = average_angle_error_canary(make_segment(centroid=None), history)
         assert score == pytest.approx(0.0)
+
+
+class TestBacktrackMarkers:
+    """Loader-level checks on the compiled pattern from backtrack_markers.yaml."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Wait, that's not right.",
+            "hmm, let me look at this again",
+            "actually, no, that's a sign error",
+            "let me reconsider this step",
+            "we ran into a problem with the substitution",
+        ],
+    )
+    def test_matches_known_markers(self, text):
+        assert BACKTRACK_MARKERS.search(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "However, instead of that approach, we proceed directly.",
+            "Actually this follows immediately from the definition.",
+            "The error bound is within tolerance.",
+            "We are still awaiting the next step.",  # shouldn't match "wait"
+        ],
+    )
+    def test_does_not_match_generic_prose(self, text):
+        assert not BACKTRACK_MARKERS.search(text)

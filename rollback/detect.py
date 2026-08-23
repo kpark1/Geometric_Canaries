@@ -1,7 +1,9 @@
 import re
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
+import yaml
 
 # Handle both standard newlines and byte-level BPE newlines ('Ċ')
 BOUNDARY_PATTERN = re.compile(
@@ -22,6 +24,25 @@ LEXICAL_SMELLS = re.compile(
     r"\bsorry\b|\badmit\b|native_decide|\bobviously\b|\btrivially\b"
     r"|clearly\s+true|it is easy to see",
     re.IGNORECASE,
+)
+
+
+def _load_backtrack_markers(path: Path) -> re.Pattern:
+    """Compile backtrack_markers.yaml into one pattern (see that file for sourcing).
+
+    Single-word markers get word boundaries so they don't match inside unrelated
+    words (e.g. "wait" shouldn't match "await"); multi-word phrases are matched
+    as plain substrings, since they're already specific enough on their own.
+    """
+    with path.open(encoding="utf-8") as f:
+        tiers = yaml.safe_load(f)
+    markers = [marker for tier in tiers.values() for marker in tier]
+    parts = [re.escape(m) if " " in m else rf"\b{re.escape(m)}\b" for m in markers]
+    return re.compile("|".join(parts), re.IGNORECASE)
+
+
+BACKTRACK_MARKERS = _load_backtrack_markers(
+    Path(__file__).with_name("backtrack_markers.yaml")
 )
 
 
