@@ -88,10 +88,43 @@ def smell_canary(
     return 0.5 * z_ent + 0.5 * z_drift + smell_score
 
 
+def _unit(v: np.ndarray, eps: float = 1e-9) -> np.ndarray:
+    return v / (np.linalg.norm(v) + eps)
+
+
+def average_angle_error_canary(
+    seg: dict[str, Any],
+    history: list[dict[str, Any]],
+    warmup: int = 0,
+) -> float:
+    """Angle (radians) between the two most recent segment-centroid displacements.
+
+    Ported from geocanary/geometry/metrics.py (PR #1). That version averages
+    the angle over a whole finished trace; this scores online instead, using
+    each closed segment's centroid as one step embedding and reporting how
+    sharply the trajectory just turned relative to where it was heading.
+    Confident reasoning moves fairly directly (small angle); misled reasoning
+    zig-zags (large angle, up to pi).
+    """
+    if seg["centroid"] is None or len(history) <= warmup:
+        return 0.0
+
+    centroids = [h["centroid"] for h in history if h["centroid"] is not None]
+    centroids.append(seg["centroid"])
+    if len(centroids) < 3:
+        return 0.0
+
+    v_prev = _unit(centroids[-2] - centroids[-3])
+    v_last = _unit(centroids[-1] - centroids[-2])
+    cosine = float(np.dot(v_prev, v_last))
+    return float(np.arccos(max(-1.0, min(1.0, cosine))))
+
+
 # Canaries selectable by the pipeline, keyed by the name passed to `prove(canary=...)`.
-# Future issues add entries here (e.g. "mistake_count", "angle_error").
+# Future issues add entries here (e.g. "mistake_count").
 CANARIES: dict[str, Canary] = {
     "smell": smell_canary,
+    "aae": average_angle_error_canary,
 }
 
 

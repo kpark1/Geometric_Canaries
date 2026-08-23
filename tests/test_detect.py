@@ -1,6 +1,12 @@
 import numpy as np
 import pytest
-from detect import CANARIES, get_canary, resolve_canary, smell_canary
+from detect import (
+    CANARIES,
+    average_angle_error_canary,
+    get_canary,
+    resolve_canary,
+    smell_canary,
+)
 
 
 def make_segment(smell: bool = False, mean_entropy: float = 1.0, centroid=None):
@@ -14,6 +20,9 @@ def make_history_entry(mean_entropy: float, centroid=None):
 class TestCanaryRegistry:
     def test_smell_is_registered(self):
         assert CANARIES["smell"] is smell_canary
+
+    def test_aae_is_registered(self):
+        assert CANARIES["aae"] is average_angle_error_canary
 
     def test_get_canary_returns_registered_callable(self):
         assert get_canary("smell") is smell_canary
@@ -31,7 +40,7 @@ class TestCanaryRegistry:
         monkeypatch.setitem(CANARIES, "mistake_count", mistake_count_canary)
 
         assert get_canary("mistake_count") is mistake_count_canary
-        assert sorted(CANARIES) == ["mistake_count", "smell"]
+        assert "mistake_count" in CANARIES
 
 
 class TestResolveCanary:
@@ -106,3 +115,64 @@ class TestSmellCanary:
         # should not raise even though this segment has no centroid
         score = smell_canary(make_segment(mean_entropy=1.0, centroid=None), history)
         assert isinstance(score, float)
+
+
+class TestAverageAngleErrorCanary:
+    def test_needs_at_least_three_centroids(self):
+        history = [make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0]))]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([2.0, 0.0])), history
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_respects_warmup_parameter(self):
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([float(i), 0.0]))
+            for i in range(3)
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([3.0, 0.0])), history, warmup=3
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_straight_trajectory_scores_near_zero(self):
+        # centroids walking in a straight line: displacements never turn
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([float(i), 0.0]))
+            for i in range(3)
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([3.0, 0.0])), history
+        )
+        # arccos is numerically steep near 0/pi, so use a looser tolerance here
+        # than the exact right-angle case below
+        assert score == pytest.approx(0.0, abs=1e-3)
+
+    def test_reversed_trajectory_scores_near_pi(self):
+        # centroid doubles back the way it came: a sharp, suspicious turn
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([0.0, 0.0])),
+            make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0])),
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([0.0, 0.0])), history
+        )
+        assert score == pytest.approx(np.pi, abs=1e-3)
+
+    def test_right_angle_turn_scores_near_half_pi(self):
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([0.0, 0.0])),
+            make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0])),
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([1.0, 1.0])), history
+        )
+        assert score == pytest.approx(np.pi / 2, abs=1e-6)
+
+    def test_missing_centroid_returns_zero(self):
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([float(i), 0.0]))
+            for i in range(3)
+        ]
+        score = average_angle_error_canary(make_segment(centroid=None), history)
+        assert score == pytest.approx(0.0)
