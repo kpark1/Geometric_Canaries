@@ -74,6 +74,24 @@ def _token_index_at_char(
     return lo + 1 if lo < len(ids) else len(ids)
 
 
+def _abandoned_token_count(mode: str, abandoned: list[dict[str, Any]]) -> int:
+    """Count sampling decisions spent on abandoned branches, without double-counting.
+
+    Each abandoned branch's "ids" is captured *before* that intervention, so it
+    includes the good prefix before the flagged segment as well as the flagged
+    suffix. In restart mode the prefix is thrown away (state.reset()), so the
+    full length is genuinely abandoned. In rollback mode the prefix survives
+    (state.truncate() keeps it) and is already counted via the final
+    state.token_count, so only the flagged suffix -- from segment_start_tok
+    onward -- should count here.
+    """
+    if mode == "rollback":
+        return sum(
+            len(branch["ids"]) - branch["segment_start_tok"] for branch in abandoned
+        )
+    return sum(len(branch["ids"]) for branch in abandoned)
+
+
 @torch.no_grad()
 def prove(
     prompt: str,
@@ -420,9 +438,7 @@ def prove(
         "rollbacks": stats.rollbacks,
         "n_forward": stats.n_forward,
         "n_prefills": stats.n_prefills,
-        "gen_tokens": (
-            state.token_count + sum(len(branch["ids"]) for branch in stats.abandoned)
-        ),
+        "gen_tokens": state.token_count + _abandoned_token_count(mode, stats.abandoned),
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
         "lean_status": lean_status,
