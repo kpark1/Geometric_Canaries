@@ -43,6 +43,14 @@ class ProveRunResult(TypedDict):
     lean_status: ResponseLeanStatus
 
 
+class AgentProveRunResult(ProveRunResult):
+    """prove_fn-compatible result from agent.agent_prove: a ProveRunResult with
+    cost/event fields summed across all turns, plus per-turn history."""
+
+    turns: int
+    turn_history: list[dict[str, Any]]
+
+
 @dataclass
 class ProcessResult:
     exit_code: int
