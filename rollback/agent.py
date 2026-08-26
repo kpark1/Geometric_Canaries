@@ -39,6 +39,14 @@ def _retry_message(lean_code: str | None, feedback: str) -> str:
         "Revise your proof and produce a corrected ```lean4 block."
     )
 
+MULTI_TURN_INSTRUCTIONS = (
+    "\n\n"
+    "Include the full proof file as the last fenced ```lean4 code block in your response. "
+    "I will run that proof through the lean checker and report any feedback to you if it doesn't elaborate, "
+    "in which case, you will have another attempt. "
+    "Subsequent attempts should also include a ```lean4 code block. "
+)
+
 
 def agent_prove(
     prompt: str,
@@ -75,6 +83,8 @@ def agent_prove(
     if prove_fn is None:
         from prove import prove as prove_fn
 
+    prompt = prompt + MULTI_TURN_INSTRUCTIONS # this is somewhat hacky, but it's a fast way to get us to something approximating the results we want
+
     t0 = time.time()
     messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
     turn_history: list[dict[str, Any]] = []
@@ -85,7 +95,7 @@ def agent_prove(
     total_gen_tokens = 0
     all_events: list[dict[str, Any]] = []
     all_abandoned: list[dict[str, Any]] = []
-    result: dict[str, Any] | None = None
+    result: ProveRunResult | None = None
     final_status: ResponseLeanStatus = NO_PROOF_FOUND
 
     for turn in range(1, max_turns + 1):
@@ -129,6 +139,7 @@ def agent_prove(
                 "gen_tokens": result["gen_tokens"],
                 "n_forward": result["n_forward"],
                 "wall_s": result["wall_s"],
+                "text": result["text"],
             }
         )
         final_status = status
