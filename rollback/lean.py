@@ -15,8 +15,6 @@ from rollback_types import (
     ProcessTimeout,
 )
 
-# Overridable so a job can point at a node-local staged copy (see
-# orc_local/lean_staging_notes.md); defaults to the in-repo project on NFS.
 LEAN_PROJECT_DIR = Path(
     os.environ.get(
         "LEAN_PROJECT_DIR", Path(__file__).resolve().parent.parent / "lean-project"
