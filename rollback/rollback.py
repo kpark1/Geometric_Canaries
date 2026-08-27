@@ -64,27 +64,13 @@ mutation + real-advisory dataset from the previous notebook drops back in unchan
 the loop is trusted — `prove()` only needs `build_prompt(item, variant)`.
 """
 
-MINIMAL_PAIRS = []
-for name, m in LEAN_MODELS.items():
-    MINIMAL_PAIRS.append(
-        {
-            "id": name,
-            "bug_type": m["bug_type"],
-            "provenance": "mutation",
-            "real_world_analogue": m["real_world_analogue"],
-            "fixed": {"defn": m["fixed_defn"], "spec": m["spec"], "provable": True},
-            "buggy": {"defn": m["buggy_defn"], "spec": m["spec"], "provable": False},
-        }
-    )
-
-
 pair_ids: list[str] = []
-for pair in MINIMAL_PAIRS:
+for pair in LEAN_MODELS:
     pair_id = pair["id"]
     assert isinstance(pair_id, str)
     pair_ids.append(pair_id)
 
-print(f"{len(MINIMAL_PAIRS)} minimal pairs: " + ", ".join(pair_ids))
+print(f"{len(LEAN_MODELS)} minimal pairs: " + ", ".join(pair_ids))
 
 """## Segmentation and the bad-logic detector
 
@@ -152,7 +138,7 @@ def stop_reason_label(stop_reason: str) -> str:
 
 def show_single_result(
     res: ProveRunResult,
-    item: dict[str, Any],
+    challenge: Challenge,
 ) -> None:
     """Print and plot one generated proof result."""
     print(
@@ -171,7 +157,7 @@ def show_single_result(
         print("\n--- prompt ---\n", res["prompt"])
     print("\n--- final text ---\n", res["text"])
     print("-" * 50)
-    plot_timeline(res, title=f"{item['id']} / buggy / rollback")
+    plot_timeline(res, title=f"{challenge['id']} / buggy / rollback")
 
 
 def show_run_generations(df: pd.DataFrame) -> None:
@@ -342,7 +328,7 @@ def main() -> None:
         print(f"Using cached result: {result_name=}, {saved_at=}")
         # print(f'{result=}')
         if args.single_example:
-            show_single_result(result, MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX])
+            show_single_result(result, LEAN_MODELS[SINGLE_EXAMPLE_INDEX])
         else:
             show_eval_result(result)
         total_time = time.perf_counter() - start_time
@@ -364,13 +350,12 @@ def main() -> None:
     )
     run_rollback_eval = partial(
         run_eval,
-        MINIMAL_PAIRS,
+        LEAN_MODELS,
         build_prompt,
         prove,
     )
     if args.single_example:
-        item = MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]
-        challenge = cast(Challenge, item["buggy"])
+        challenge = LEAN_MODELS[SINGLE_EXAMPLE_INDEX]
         res = prove(
             build_prompt(challenge),
             mode="rollback",
@@ -379,7 +364,7 @@ def main() -> None:
             seed=0,
         )
         save_result(FILEDIR, results, result_name, res)
-        show_single_result(res, item)
+        show_single_result(res, challenge)
         total_time = time.perf_counter() - start_time
         print(f"{total_time=:.1f}")
         return

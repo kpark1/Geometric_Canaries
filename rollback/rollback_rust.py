@@ -17,35 +17,68 @@ def rust_comment(name: str) -> str:
 
 LEAN_PREAMBLE = load_fixture("preamble.lean") + "\n"
 
-LEAN_MODELS = {
-    "binary_search": {
+class ChallengWithMetadata(Challenge):
+    bug_type: str
+    real_world_analogue: str
+
+LEAN_MODELS: list[ChallengWithMetadata] = [
+    {
+        "id": "binary_search_fixed",
         "bug_type": "progress_bug",
         "real_world_analogue": "loop-progress / midpoint bug family "
         "(cf. the JDK Arrays.binarySearch overflow, Bloch 2006)",
-        "fixed_defn": (
+        "definition": (
             rust_comment("binary_search") + load_fixture("binary_search_fixed.lean")
         ),
-        "buggy_defn": (
+        "spec": load_fixture("binary_search_spec.lean"),
+        "provable": True,
+    },
+    {
+        "id": "binary_search_buggy",
+        "bug_type": "progress_bug",
+        "real_world_analogue": "loop-progress / midpoint bug family "
+        "(cf. the JDK Arrays.binarySearch overflow, Bloch 2006)",
+        "definition": (
             rust_comment("binary_search") + load_fixture("binary_search_buggy.lean")
         ),
         "spec": load_fixture("binary_search_spec.lean"),
+        "provable": False,
     },
-    "sat_sub": {
+    {
+        "id": "sat_sub_fixed",
         "bug_type": "underflow_panic",
         "real_world_analogue": "integer-underflow panic class "
         "(recurring RustSec advisory category)",
-        "fixed_defn": (rust_comment("sat_sub") + load_fixture("sat_sub_fixed.lean")),
-        "buggy_defn": (rust_comment("sat_sub") + load_fixture("sat_sub_buggy.lean")),
+        "definition": (rust_comment("sat_sub") + load_fixture("sat_sub_fixed.lean")),
         "spec": load_fixture("sat_sub_spec.lean"),
+        "provable": True,
     },
-    "clamp": {
+    {
+        "id": "sat_sub_buggy",
+        "bug_type": "underflow_panic",
+        "real_world_analogue": "integer-underflow panic class "
+        "(recurring RustSec advisory category)",
+        "definition": (rust_comment("sat_sub") + load_fixture("sat_sub_buggy.lean")),
+        "spec": load_fixture("sat_sub_spec.lean"),
+        "provable": False,
+    },
+    {
+        "id": "clamp_fixed",
         "bug_type": "flipped_comparison",
         "real_world_analogue": "comparison-flip logic-error family",
-        "fixed_defn": (rust_comment("clamp") + load_fixture("clamp_fixed.lean")),
-        "buggy_defn": (rust_comment("clamp") + load_fixture("clamp_buggy.lean")),
+        "definition": (rust_comment("clamp") + load_fixture("clamp_fixed.lean")),
         "spec": load_fixture("clamp_spec.lean"),
+        "provable": True,
     },
-}
+    {
+        "id": "clamp_buggy",
+        "bug_type": "flipped_comparison",
+        "real_world_analogue": "comparison-flip logic-error family",
+        "definition": (rust_comment("clamp") + load_fixture("clamp_buggy.lean")),
+        "spec": load_fixture("clamp_spec.lean"),
+        "provable": False,
+    },
+]
 
 
 class BuildPromptFunction(Protocol):

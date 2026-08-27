@@ -1,10 +1,10 @@
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Iterable
 
 import pandas as pd
 from rollback_rust import BuildPromptFunction
-from rollback_types import ProveRunResult
+from rollback_types import Challenge, ProveRunResult
 
 CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
 CLAIM_FALSE = re.compile(
@@ -24,7 +24,7 @@ def proxy_outcome(text: str) -> str:
 
 
 def run_eval(
-    items: list[dict[str, Any]],
+    challenges: Iterable[Challenge],
     build_prompt_fn: BuildPromptFunction,
     prove_fn: Callable[..., ProveRunResult],
     modes: tuple[str, ...] = ("plain", "rollback", "restart"),
@@ -33,36 +33,33 @@ def run_eval(
     thresh: float = 1.8,
 ) -> pd.DataFrame:
     rows = []
-    for item in items:
-        for variant in ("fixed", "buggy"):
-            challenge = item[variant]
-            prompt = build_prompt_fn(challenge)
-            for mode in modes:
-                for seed in seeds:
-                    result = prove_fn(
-                        prompt,
-                        mode=mode,
-                        max_new_tokens=max_new_tokens,
-                        thresh=thresh,
-                        seed=seed,
-                    )
-                    rows.append(
-                        {
-                            "id": item["id"],
-                            "variant": variant,
-                            "provable": item[variant]["provable"],
-                            "mode": mode,
-                            "seed": seed,
-                            "outcome": result["lean_status"],
-                            "stop_reason": result["stop_reason"],
-                            "prompt": result.get("prompt", prompt),
-                            "text": result["text"],
-                            "events": result["events"],
-                            "interventions": result["rollbacks"],
-                            "gen_tokens": result["gen_tokens"],
-                            "n_forward": result["n_forward"],
-                            "prefills": result["n_prefills"],
-                            "wall_s": result["wall_s"],
-                        }
-                    )
+    for challenge in challenges:
+        prompt = build_prompt_fn(challenge)
+        for mode in modes:
+            for seed in seeds:
+                result = prove_fn(
+                    prompt,
+                    mode=mode,
+                    max_new_tokens=max_new_tokens,
+                    thresh=thresh,
+                    seed=seed,
+                )
+                rows.append(
+                    {
+                        "id": challenge["id"],
+                        "provable": challenge["provable"],
+                        "mode": mode,
+                        "seed": seed,
+                        "outcome": result["lean_status"],
+                        "stop_reason": result["stop_reason"],
+                        "prompt": result.get("prompt", prompt),
+                        "text": result["text"],
+                        "events": result["events"],
+                        "interventions": result["rollbacks"],
+                        "gen_tokens": result["gen_tokens"],
+                        "n_forward": result["n_forward"],
+                        "prefills": result["n_prefills"],
+                        "wall_s": result["wall_s"],
+                    }
+                )
     return pd.DataFrame(rows)
