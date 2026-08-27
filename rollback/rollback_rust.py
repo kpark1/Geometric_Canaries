@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 
 from rollback_types import Challenge
 
@@ -17,9 +17,11 @@ def rust_comment(name: str) -> str:
 
 LEAN_PREAMBLE = load_fixture("preamble.lean") + "\n"
 
+
 class ChallengeWithMetadata(Challenge):
     bug_type: str
     real_world_analogue: str
+
 
 LEAN_MODELS: list[ChallengeWithMetadata] = [
     {
@@ -87,6 +89,8 @@ class BuildPromptFunction(Protocol):
         challenge: Challenge,
         use_mathlib_header: bool = True,
     ) -> str: ...
+
+
 def build_prompt(
     challenge: Challenge,
     use_mathlib_header: bool = True,
@@ -109,4 +113,6 @@ def build_prompt(
         "If the statement is false, state this explicitly and give a concrete "
         "counterexample instead of a proof."
     )
+
+
 _: BuildPromptFunction = build_prompt

@@ -11,16 +11,15 @@ from detect import (
     find_boundary,
     score_segment,
 )
-from prompt import encode_prompt
-from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
-from state import RunStats, State, Token
-from transformers import DynamicCache
-
 from lean import (
     DEFAULT_TIMEOUT_S,
     extract_lean_deepseek_prover_style,
     lean_elaborates_no_sorry,
 )
+from prompt import encode_prompt
+from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
+from state import RunStats, State, Token
+from transformers import DynamicCache
 
 HINT = (
     "\nWait -- let me re-check the last step carefully before continuing. "

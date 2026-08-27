@@ -1,6 +1,5 @@
 import re
-from collections.abc import Callable
-from typing import Iterable
+from collections.abc import Callable, Iterable
 
 import pandas as pd
 from rollback_rust import BuildPromptFunction

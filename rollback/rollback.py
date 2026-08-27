@@ -162,8 +162,7 @@ def show_run_generations(df: pd.DataFrame) -> None:
     print("=" * 50)
     for _, row in df.iterrows():
         print(
-            f"\n=== {row['id']} / {row['buggy']} / {row['mode']} "
-            f"seed={row['seed']} ==="
+            f"\n=== {row['id']} / {row['buggy']} / {row['mode']} seed={row['seed']} ==="
         )
         print(
             f"outcome={row['outcome']}  interventions={row['interventions']}  "
