@@ -54,3 +54,7 @@ class ProcessTimeout:
 
 
 type ProcessResultOrTimeout = ProcessResult | ProcessTimeout
+
+class Challenge(TypedDict):
+    definition: str
+    spec: str

@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
+from rollback_rust import BuildPromptFunction
 from rollback_types import ProveRunResult
 
 CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
@@ -24,7 +25,7 @@ def proxy_outcome(text: str) -> str:
 
 def run_eval(
     items: list[dict[str, Any]],
-    build_prompt_fn: Callable[..., str],
+    build_prompt_fn: BuildPromptFunction,
     prove_fn: Callable[..., ProveRunResult],
     modes: tuple[str, ...] = ("plain", "rollback", "restart"),
     seeds: tuple[int, ...] = (0, 1),
@@ -34,7 +35,8 @@ def run_eval(
     rows = []
     for item in items:
         for variant in ("fixed", "buggy"):
-            prompt = build_prompt_fn(item, variant)
+            challenge = item[variant]
+            prompt = build_prompt_fn(challenge)
             for mode in modes:
                 for seed in seeds:
                     result = prove_fn(

@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+from rollback_types import Challenge
 
 FIXTURE_DIR = Path(__file__).parent / "rust_fixtures"
 DSP_HEADER = "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 400000\n\n"
@@ -46,19 +48,23 @@ LEAN_MODELS = {
 }
 
 
+class BuildPromptFunction(Protocol):
+    def __call__(
+        self,
+        challenge: Challenge,
+        use_mathlib_header: bool = True,
+    ) -> str: ...
 def build_prompt(
-    item: dict[str, Any],
-    variant: str,
+    challenge: Challenge,
     use_mathlib_header: bool = True,
 ) -> str:
-    v = item[variant]
     code_block = (
         (DSP_HEADER if use_mathlib_header else "")
         + LEAN_PREAMBLE
         + "\n"
-        + v["defn"]
+        + challenge["definition"]
         + "\n\n"
-        + v["spec"]
+        + challenge["spec"]
     )
     return (
         "Complete the following Lean 4 code:\n\n```lean4\n" + code_block + "\n```\n\n"
@@ -70,3 +76,4 @@ def build_prompt(
         "If the statement is false, state this explicitly and give a concrete "
         "counterexample instead of a proof."
     )
+_: BuildPromptFunction = build_prompt

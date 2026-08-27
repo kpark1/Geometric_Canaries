@@ -36,7 +36,7 @@ import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -45,7 +45,7 @@ from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
 from rollback_rust import LEAN_MODELS, build_prompt
-from rollback_types import NO_PROOF_FOUND, LeanStatus, ProveRunResult
+from rollback_types import NO_PROOF_FOUND, Challenge, LeanStatus, ProveRunResult
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
@@ -370,8 +370,9 @@ def main() -> None:
     )
     if args.single_example:
         item = MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]
+        challenge = cast(Challenge, item["buggy"])
         res = prove(
-            build_prompt(item, "buggy"),
+            build_prompt(challenge),
             mode="rollback",
             max_new_tokens=args.max_new_tokens,
             thresh=1.8,
