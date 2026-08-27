@@ -54,15 +54,6 @@ PROJECT_CACHE = os.path.join(
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 FILEDIR = Path(__file__).parent / "log"
 SINGLE_EXAMPLE_INDEX = 1
-"""## Dataset — 3 Aeneas-style minimal pairs
-
-Each item is a (fixed, buggy) pair in the Aeneas-faithful Lean subset (`Result` monad,
-fallible machine-integer ops) with a spec that is provable for the fixed variant and
-false for the buggy one. Three bug families kept for the prototype: loop progress
-(`binary_search`), underflow panic (`sat_sub`), flipped comparison (`clamp`). The full
-mutation + real-advisory dataset from the previous notebook drops back in unchanged once
-the loop is trusted — `prove()` only needs `build_prompt(item, variant)`.
-"""
 
 pair_ids: list[str] = []
 for pair in LEAN_MODELS:
@@ -114,7 +105,7 @@ entropy).
 
 """## Evaluation — does checkpointing help, and is it cheaper?
 
-3 items × 2 variants × 3 modes × seeds. Two questions, two tables:
+Two questions, two tables:
 
 1. **Detection/steering** — outcome by variant and mode. On *buggy* items the desired
    outcome is `claims_false` (the spec is false); on *fixed* items, `claims_proof`.
