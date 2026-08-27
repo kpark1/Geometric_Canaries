@@ -23,16 +23,22 @@ class ChallengeWithMetadata(Challenge):
     real_world_analogue: str
 
 
+def _lean_code(name: str, variant: str) -> str:
+    return (
+        rust_comment(name)
+        + load_fixture(f"{name}_{variant}.lean")
+        + "\n\n"
+        + load_fixture(f"{name}_spec.lean")
+    )
+
+
 LEAN_MODELS: list[ChallengeWithMetadata] = [
     {
         "id": "binary_search_fixed",
         "bug_type": "progress_bug",
         "real_world_analogue": "loop-progress / midpoint bug family "
         "(cf. the JDK Arrays.binarySearch overflow, Bloch 2006)",
-        "definition": (
-            rust_comment("binary_search") + load_fixture("binary_search_fixed.lean")
-        ),
-        "spec": load_fixture("binary_search_spec.lean"),
+        "lean_code": _lean_code("binary_search", "fixed"),
         "buggy": False,
     },
     {
@@ -40,10 +46,7 @@ LEAN_MODELS: list[ChallengeWithMetadata] = [
         "bug_type": "progress_bug",
         "real_world_analogue": "loop-progress / midpoint bug family "
         "(cf. the JDK Arrays.binarySearch overflow, Bloch 2006)",
-        "definition": (
-            rust_comment("binary_search") + load_fixture("binary_search_buggy.lean")
-        ),
-        "spec": load_fixture("binary_search_spec.lean"),
+        "lean_code": _lean_code("binary_search", "buggy"),
         "buggy": True,
     },
     {
@@ -51,8 +54,7 @@ LEAN_MODELS: list[ChallengeWithMetadata] = [
         "bug_type": "underflow_panic",
         "real_world_analogue": "integer-underflow panic class "
         "(recurring RustSec advisory category)",
-        "definition": (rust_comment("sat_sub") + load_fixture("sat_sub_fixed.lean")),
-        "spec": load_fixture("sat_sub_spec.lean"),
+        "lean_code": _lean_code("sat_sub", "fixed"),
         "buggy": False,
     },
     {
@@ -60,24 +62,21 @@ LEAN_MODELS: list[ChallengeWithMetadata] = [
         "bug_type": "underflow_panic",
         "real_world_analogue": "integer-underflow panic class "
         "(recurring RustSec advisory category)",
-        "definition": (rust_comment("sat_sub") + load_fixture("sat_sub_buggy.lean")),
-        "spec": load_fixture("sat_sub_spec.lean"),
+        "lean_code": _lean_code("sat_sub", "buggy"),
         "buggy": True,
     },
     {
         "id": "clamp_fixed",
         "bug_type": "flipped_comparison",
         "real_world_analogue": "comparison-flip logic-error family",
-        "definition": (rust_comment("clamp") + load_fixture("clamp_fixed.lean")),
-        "spec": load_fixture("clamp_spec.lean"),
+        "lean_code": _lean_code("clamp", "fixed"),
         "buggy": False,
     },
     {
         "id": "clamp_buggy",
         "bug_type": "flipped_comparison",
         "real_world_analogue": "comparison-flip logic-error family",
-        "definition": (rust_comment("clamp") + load_fixture("clamp_buggy.lean")),
-        "spec": load_fixture("clamp_spec.lean"),
+        "lean_code": _lean_code("clamp", "buggy"),
         "buggy": True,
     },
 ]
@@ -99,9 +98,7 @@ def build_prompt(
         (DSP_HEADER if use_mathlib_header else "")
         + LEAN_PREAMBLE
         + "\n"
-        + challenge["definition"]
-        + "\n\n"
-        + challenge["spec"]
+        + challenge["lean_code"]
     )
     return (
         "Complete the following Lean 4 code:\n\n```lean4\n" + code_block + "\n```\n\n"
