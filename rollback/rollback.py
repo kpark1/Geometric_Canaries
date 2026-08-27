@@ -171,7 +171,7 @@ def show_run_generations(df: pd.DataFrame) -> None:
     print("=" * 50)
     for _, row in df.iterrows():
         print(
-            f"\n=== {row['id']} / {row['variant']} / {row['mode']} "
+            f"\n=== {row['id']} / {row['buggy']} / {row['mode']} "
             f"seed={row['seed']} ==="
         )
         print(
@@ -195,8 +195,8 @@ def show_eval_result(df: pd.DataFrame) -> None:
     # Keep the comparison table readable when text/prompt are present.
     summary_cols = [c for c in df.columns if c not in ("text", "prompt", "events")]
     print(df[summary_cols].to_string(index=False))
-    print("\nOutcome by variant x mode:")
-    outcome_table = pd.crosstab([df.variant, df["mode"]], df.outcome).reindex(
+    print("\nOutcome by bugginess x mode:")
+    outcome_table = pd.crosstab([df.buggy, df["mode"]], df.outcome).reindex(
         columns=[member.value for member in LeanStatus] + [NO_PROOF_FOUND],
         fill_value=0,
     )
