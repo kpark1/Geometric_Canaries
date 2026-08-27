@@ -47,7 +47,7 @@ def run_eval(
                 rows.append(
                     {
                         "id": challenge["id"],
-                        "provable": challenge["provable"],
+                        "buggy": challenge["buggy"],
                         "mode": mode,
                         "seed": seed,
                         "outcome": result["lean_status"],

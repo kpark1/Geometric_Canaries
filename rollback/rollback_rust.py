@@ -31,7 +31,7 @@ LEAN_MODELS: list[ChallengWithMetadata] = [
             rust_comment("binary_search") + load_fixture("binary_search_fixed.lean")
         ),
         "spec": load_fixture("binary_search_spec.lean"),
-        "provable": True,
+        "buggy": False,
     },
     {
         "id": "binary_search_buggy",
@@ -42,7 +42,7 @@ LEAN_MODELS: list[ChallengWithMetadata] = [
             rust_comment("binary_search") + load_fixture("binary_search_buggy.lean")
         ),
         "spec": load_fixture("binary_search_spec.lean"),
-        "provable": False,
+        "buggy": True,
     },
     {
         "id": "sat_sub_fixed",
@@ -51,7 +51,7 @@ LEAN_MODELS: list[ChallengWithMetadata] = [
         "(recurring RustSec advisory category)",
         "definition": (rust_comment("sat_sub") + load_fixture("sat_sub_fixed.lean")),
         "spec": load_fixture("sat_sub_spec.lean"),
-        "provable": True,
+        "buggy": False,
     },
     {
         "id": "sat_sub_buggy",
@@ -60,7 +60,7 @@ LEAN_MODELS: list[ChallengWithMetadata] = [
         "(recurring RustSec advisory category)",
         "definition": (rust_comment("sat_sub") + load_fixture("sat_sub_buggy.lean")),
         "spec": load_fixture("sat_sub_spec.lean"),
-        "provable": False,
+        "buggy": True,
     },
     {
         "id": "clamp_fixed",
@@ -68,7 +68,7 @@ LEAN_MODELS: list[ChallengWithMetadata] = [
         "real_world_analogue": "comparison-flip logic-error family",
         "definition": (rust_comment("clamp") + load_fixture("clamp_fixed.lean")),
         "spec": load_fixture("clamp_spec.lean"),
-        "provable": True,
+        "buggy": False,
     },
     {
         "id": "clamp_buggy",
@@ -76,7 +76,7 @@ LEAN_MODELS: list[ChallengWithMetadata] = [
         "real_world_analogue": "comparison-flip logic-error family",
         "definition": (rust_comment("clamp") + load_fixture("clamp_buggy.lean")),
         "spec": load_fixture("clamp_spec.lean"),
-        "provable": False,
+        "buggy": True,
     },
 ]
 

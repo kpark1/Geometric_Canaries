@@ -59,4 +59,4 @@ class Challenge(TypedDict):
     id: str
     definition: str
     spec: str
-    provable: bool
+    buggy: bool
