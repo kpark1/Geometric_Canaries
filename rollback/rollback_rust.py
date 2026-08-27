@@ -17,11 +17,11 @@ def rust_comment(name: str) -> str:
 
 LEAN_PREAMBLE = load_fixture("preamble.lean") + "\n"
 
-class ChallengWithMetadata(Challenge):
+class ChallengeWithMetadata(Challenge):
     bug_type: str
     real_world_analogue: str
 
-LEAN_MODELS: list[ChallengWithMetadata] = [
+LEAN_MODELS: list[ChallengeWithMetadata] = [
     {
         "id": "binary_search_fixed",
         "bug_type": "progress_bug",

@@ -36,7 +36,7 @@ import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -53,15 +53,15 @@ PROJECT_CACHE = os.path.join(
 # DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 FILEDIR = Path(__file__).parent / "log"
-SINGLE_EXAMPLE_INDEX = 1
+SINGLE_EXAMPLE_INDEX = 2
 
-pair_ids: list[str] = []
-for pair in LEAN_MODELS:
-    pair_id = pair["id"]
-    assert isinstance(pair_id, str)
-    pair_ids.append(pair_id)
+challenge_ids: list[str] = []
+for challenge in LEAN_MODELS:
+    challenge_id = challenge["id"]
+    assert isinstance(challenge_id, str)
+    challenge_ids.append(challenge_id)
 
-print(f"{len(LEAN_MODELS)} minimal pairs: " + ", ".join(pair_ids))
+print(f"{len(LEAN_MODELS)} challenges: " + ", ".join(challenge_ids))
 
 """## Segmentation and the bad-logic detector
 
