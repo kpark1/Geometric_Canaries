@@ -2,8 +2,8 @@ import re
 from collections.abc import Callable, Iterable
 
 import pandas as pd
-from rollback_rust import BuildPromptFunction
 from rollback_types import Challenge, ProveRunResult
+from verina import BuildPromptFunction
 
 CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
 CLAIM_FALSE = re.compile(

@@ -44,8 +44,8 @@ from draw import plot_timeline
 from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback_rust import LEAN_MODELS, build_prompt
 from rollback_types import NO_PROOF_FOUND, Challenge, LeanStatus, ProveRunResult
+from verina import build_prompt, load_verina_challenges
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
@@ -54,14 +54,7 @@ PROJECT_CACHE = os.path.join(
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 FILEDIR = Path(__file__).parent / "log"
 SINGLE_EXAMPLE_INDEX = 2
-
-challenge_ids: list[str] = []
-for challenge in LEAN_MODELS:
-    challenge_id = challenge["id"]
-    assert isinstance(challenge_id, str)
-    challenge_ids.append(challenge_id)
-
-print(f"{len(LEAN_MODELS)} challenges: " + ", ".join(challenge_ids))
+DEFAULT_LIMIT = 5
 
 """## Segmentation and the bad-logic detector
 
@@ -148,7 +141,7 @@ def show_single_result(
         print("\n--- prompt ---\n", res["prompt"])
     print("\n--- final text ---\n", res["text"])
     print("-" * 50)
-    plot_timeline(res, title=f"{challenge['id']} / buggy / rollback")
+    plot_timeline(res, title=f"{challenge['id']} / rollback")
 
 
 def show_run_generations(df: pd.DataFrame) -> None:
@@ -297,6 +290,15 @@ def main() -> None:
             "load log/result_<TIMESTAMP>.pkl instead of running (e.g. 20260803_221329)"
         ),
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_LIMIT,
+        help=(
+            f"number of Verina examples to load (default: {DEFAULT_LIMIT}; "
+            "<= 0 loads all)"
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.WARNING,
@@ -306,6 +308,12 @@ def main() -> None:
         logging.getLogger("prove").setLevel(logging.DEBUG)
     print(f"Max new tokens: {args.max_new_tokens}")
     result_name = "single_example" if args.single_example else "full_eval"
+
+    challenges = load_verina_challenges(limit=args.limit)
+    print(
+        f"{len(challenges)} challenges: "
+        + ", ".join(challenge["id"] for challenge in challenges)
+    )
 
     if args.single_example:
         print(f"{SINGLE_EXAMPLE_INDEX=}")
@@ -318,7 +326,7 @@ def main() -> None:
         print(f"Using cached result: {result_name=}, {saved_at=}")
         # print(f'{result=}')
         if args.single_example:
-            show_single_result(result, LEAN_MODELS[SINGLE_EXAMPLE_INDEX])
+            show_single_result(result, challenges[SINGLE_EXAMPLE_INDEX])
         else:
             show_eval_result(result)
         total_time = time.perf_counter() - start_time
@@ -340,12 +348,12 @@ def main() -> None:
     )
     run_rollback_eval = partial(
         run_eval,
-        LEAN_MODELS,
+        challenges,
         build_prompt,
         prove,
     )
     if args.single_example:
-        challenge = LEAN_MODELS[SINGLE_EXAMPLE_INDEX]
+        challenge = challenges[SINGLE_EXAMPLE_INDEX]
         res = prove(
             build_prompt(challenge),
             mode="rollback",
