@@ -8,19 +8,19 @@ import torch.nn.functional as F
 from detect import (
     LEXICAL_SMELLS,
     MIN_SEGMENT_TOKENS,
+    Canary,
     find_boundary,
-    score_segment,
+    resolve_canary,
 )
-from prompt import encode_prompt
-from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
-from state import RunStats, State, Token
-from transformers import DynamicCache
-
 from lean import (
     DEFAULT_TIMEOUT_S,
     extract_lean_deepseek_prover_style,
     lean_elaborates_no_sorry,
 )
+from prompt import encode_messages, encode_prompt
+from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
+from state import RunStats, State, Token
+from transformers import DynamicCache
 
 HINT = (
     "\nWait -- let me re-check the last step carefully before continuing. "
@@ -56,12 +56,40 @@ def _token_index_at_char(
     char_index: int,
     tokenizer: Any,
 ) -> int:
-    """Map a decoded character boundary to an exclusive token index."""
-    for i in range(len(ids)):
-        prefix = tokenizer.decode(ids[: i + 1], skip_special_tokens=True)
-        if len(prefix) >= char_index:
-            return i + 1
-    return len(ids)
+    """Map a decoded character boundary to an exclusive token index.
+
+    Binary search: decoded length is monotonic in prefix length, so this
+    needs O(log n) decode calls instead of a linear scan that re-decodes the
+    whole growing prefix at every step (O(n) decode calls, each themselves
+    O(n) -- quadratic overall).
+    """
+    lo, hi = 0, len(ids)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        prefix_len = len(tokenizer.decode(ids[: mid + 1], skip_special_tokens=True))
+        if prefix_len >= char_index:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo + 1 if lo < len(ids) else len(ids)
+
+
+def _abandoned_token_count(mode: str, abandoned: list[dict[str, Any]]) -> int:
+    """Count sampling decisions spent on abandoned branches, without double-counting.
+
+    Each abandoned branch's "ids" is captured *before* that intervention, so it
+    includes the good prefix before the flagged segment as well as the flagged
+    suffix. In restart mode the prefix is thrown away (state.reset()), so the
+    full length is genuinely abandoned. In rollback mode the prefix survives
+    (state.truncate() keeps it) and is already counted via the final
+    state.token_count, so only the flagged suffix -- from segment_start_tok
+    onward -- should count here.
+    """
+    if mode == "rollback":
+        return sum(
+            len(branch["ids"]) - branch["segment_start_tok"] for branch in abandoned
+        )
+    return sum(len(branch["ids"]) for branch in abandoned)
 
 
 @torch.no_grad()
@@ -71,6 +99,7 @@ def prove(
     tokenizer: Any,
     capture_layer: int,
     mode: str = "rollback",
+    canary: str | Canary = "smell",
     max_new_tokens: int = 2048,
     max_rollbacks: int = 3,
     thresh: float = 1.8,
@@ -79,6 +108,7 @@ def prove(
     seed: int = 0,
     inject_hint: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    messages: list[dict[str, str]] | None = None,
 ) -> ProveRunResult:
     """One streaming generate-detect-rollback run.
 
@@ -89,6 +119,14 @@ def prove(
       'restart'  -- on a flagged segment, throw everything away and resample
                     from the prompt (matched-intervention baseline: same
                     detector, no checkpointing)
+
+    canary: name of a registered signal in `detect.CANARIES` (or a callable
+      matching `detect.Canary`) used to score each closed segment.
+
+    messages: a full conversation (e.g. a prior attempt plus tool feedback) to
+      encode instead of the single-turn `prompt`, for callers building a
+      multi-turn retry loop (see `agent.py`). `prompt` is still stored in the
+      result for labeling either way.
 
     A *checkpoint* is just a sequence.token_count: the KV cache up to the start of
     the current segment.  Rollback = cache.crop(ck) -- the prompt and the good
@@ -113,8 +151,13 @@ def prove(
                         └── yes → roll back and regenerate
     """
     t0 = time.time()
+    canary_name, canary_fn = resolve_canary(canary)
     gen = torch.Generator(device="cpu").manual_seed(seed)
-    input_ids = encode_prompt(prompt, tokenizer).to(model.device)
+    input_ids = (
+        encode_messages(messages, tokenizer)
+        if messages is not None
+        else encode_prompt(prompt, tokenizer)
+    ).to(model.device)
     prompt_len = input_ids.shape[1]
 
     cache = DynamicCache()
@@ -154,7 +197,7 @@ def prove(
             seg_end_char=seg_end_char,
             lexical_smells=LEXICAL_SMELLS,
         )
-        segment["score"] = score_segment(segment, history)
+        segment["score"] = canary_fn(segment, history)
         return segment
 
     while state.token_count < max_new_tokens:
@@ -392,6 +435,7 @@ def prove(
 
     return {
         "mode": mode,
+        "canary": canary_name,
         "prompt": prompt,
         "text": state.text,
         "ids": state.ids,
@@ -404,9 +448,7 @@ def prove(
         "rollbacks": stats.rollbacks,
         "n_forward": stats.n_forward,
         "n_prefills": stats.n_prefills,
-        "gen_tokens": (
-            state.token_count + sum(len(branch["ids"]) for branch in stats.abandoned)
-        ),
+        "gen_tokens": state.token_count + _abandoned_token_count(mode, stats.abandoned),
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
         "lean_status": lean_status,

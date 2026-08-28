@@ -1,25 +1,8 @@
-import re
 from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
 from rollback_types import ProveRunResult
-
-CLAIM_PROOF = re.compile(r"```lean4?[\s\S]*?```|\bQED\b", re.IGNORECASE)
-CLAIM_FALSE = re.compile(
-    r"counterexample|statement is false|does not hold"
-    r"|cannot be proved",
-    re.IGNORECASE,
-)
-
-
-def proxy_outcome(text: str) -> str:
-    """Stub outcome until Lean verification is wired in."""
-    if CLAIM_FALSE.search(text):
-        return "claims_false"
-    if CLAIM_PROOF.search(text):
-        return "claims_proof"
-    return "no_conclusion"
 
 
 def run_eval(
@@ -30,6 +13,7 @@ def run_eval(
     seeds: tuple[int, ...] = (0, 1),
     max_new_tokens: int = 384,
     thresh: float = 1.8,
+    canary: str = "smell",
 ) -> pd.DataFrame:
     rows = []
     for item in items:
@@ -40,6 +24,7 @@ def run_eval(
                     result = prove_fn(
                         prompt,
                         mode=mode,
+                        canary=canary,
                         max_new_tokens=max_new_tokens,
                         thresh=thresh,
                         seed=seed,
@@ -50,6 +35,7 @@ def run_eval(
                             "variant": variant,
                             "provable": item[variant]["provable"],
                             "mode": mode,
+                            "canary": result["canary"],
                             "seed": seed,
                             "outcome": result["lean_status"],
                             "stop_reason": result["stop_reason"],
