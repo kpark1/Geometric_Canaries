@@ -1,0 +1,6 @@
+{
+  "challenge_id": "chal_add_comm",
+  "attempt": 1,
+  "grade": "incomplete",
+  "detail": "hit max_new_tokens; no gradeable proof"
+}
