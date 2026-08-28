@@ -40,6 +40,7 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from agent import agent_prove
 from detect import CANARIES
 from draw import plot_timeline
 from evaluate import run_eval
@@ -312,6 +313,18 @@ def main() -> None:
         help="signal used to score segments for intervention (default: smell)",
     )
     parser.add_argument(
+        "--agentic",
+        action="store_true",
+        help="use a tool-enabled agent (multi-turn, checked via Lean) instead "
+        "of a single-attempt no-tools generation",
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=3,
+        help="turn budget for --agentic (default: 3); ignored otherwise",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="use the small model for a quick run",
@@ -363,12 +376,21 @@ def main() -> None:
         device_request=DEVICE_REQUEST,
     )
 
-    prove = partial(
-        run_proof,
-        model=model,
-        tokenizer=tokenizer,
-        capture_layer=capture_layer,
-    )
+    if args.agentic:
+        prove = partial(
+            agent_prove,
+            model=model,
+            tokenizer=tokenizer,
+            capture_layer=capture_layer,
+            max_turns=args.max_turns,
+        )
+    else:
+        prove = partial(
+            run_proof,
+            model=model,
+            tokenizer=tokenizer,
+            capture_layer=capture_layer,
+        )
     run_rollback_eval = partial(
         run_eval,
         MINIMAL_PAIRS,

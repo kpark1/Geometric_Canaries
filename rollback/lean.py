@@ -92,8 +92,7 @@ def _parse_messages(stdout: str) -> list[dict[str, Any]]:
     return messages
 
 
-def _classify(res: ProcessResult) -> LeanStatus:
-    messages = _parse_messages(res.stdout)
+def _classify(res: ProcessResult, messages: list[dict[str, Any]]) -> LeanStatus:
     if any(
         str(message.get("data", "")).startswith(SORRY_MESSAGE_PREFIX)
         for message in messages
@@ -106,15 +105,35 @@ def _classify(res: ProcessResult) -> LeanStatus:
     return LeanStatus.OK
 
 
+def _format_messages(messages: list[dict[str, Any]]) -> str:
+    """Render Lean's diagnostic messages as text an agent can act on."""
+    if not messages:
+        return "(no diagnostic output)"
+    lines = []
+    for message in messages:
+        severity = message.get("severity", "info")
+        pos = message.get("pos", {})
+        loc = f"{pos.get('line', '?')}:{pos.get('column', '?')}"
+        data = str(message.get("data", "")).strip()
+        lines.append(f"[{severity} at {loc}] {data}")
+    return "\n".join(lines)
+
+
 # Dominated by `import Mathlib`, which is I/O bound on the ~7 GB of .olean files
 # and can take several minutes on network storage; a tighter budget would report
 # healthy proofs as TIMEOUT.
 DEFAULT_TIMEOUT_S = 1200.0
 
 
-def lean_elaborates_no_sorry(
+def lean_check(
     lean_code: str, timeout_s: float = DEFAULT_TIMEOUT_S
-) -> LeanStatus:
+) -> tuple[LeanStatus, str]:
+    """Elaborate lean_code and return (status, human-readable diagnostic feedback).
+
+    Unlike lean_elaborates_no_sorry, this keeps Lean's actual diagnostic text --
+    an agent loop that gets to retry needs to know *what* was wrong, not just
+    pass/fail.
+    """
     lake = _find_lake()
     with tempfile.TemporaryDirectory() as workdir:
         source_path = Path(workdir) / "GeneratedProof.lean"
@@ -122,5 +141,13 @@ def lean_elaborates_no_sorry(
         result = _run_lean(lake, source_path, timeout_s)
 
     if isinstance(result, ProcessTimeout):
-        return LeanStatus.TIMEOUT
-    return _classify(result)
+        return LeanStatus.TIMEOUT, f"Lean elaboration timed out after {timeout_s:.0f}s."
+    messages = _parse_messages(result.stdout)
+    return _classify(result, messages), _format_messages(messages)
+
+
+def lean_elaborates_no_sorry(
+    lean_code: str, timeout_s: float = DEFAULT_TIMEOUT_S
+) -> LeanStatus:
+    status, _ = lean_check(lean_code, timeout_s=timeout_s)
+    return status

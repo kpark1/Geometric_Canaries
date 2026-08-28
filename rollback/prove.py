@@ -17,7 +17,7 @@ from lean import (
     extract_lean_deepseek_prover_style,
     lean_elaborates_no_sorry,
 )
-from prompt import encode_prompt
+from prompt import encode_messages, encode_prompt
 from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
 from state import RunStats, State, Token
 from transformers import DynamicCache
@@ -108,6 +108,7 @@ def prove(
     seed: int = 0,
     inject_hint: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
+    messages: list[dict[str, str]] | None = None,
 ) -> ProveRunResult:
     """One streaming generate-detect-rollback run.
 
@@ -121,6 +122,11 @@ def prove(
 
     canary: name of a registered signal in `detect.CANARIES` (or a callable
       matching `detect.Canary`) used to score each closed segment.
+
+    messages: a full conversation (e.g. a prior attempt plus tool feedback) to
+      encode instead of the single-turn `prompt`, for callers building a
+      multi-turn retry loop (see `agent.py`). `prompt` is still stored in the
+      result for labeling either way.
 
     A *checkpoint* is just a sequence.token_count: the KV cache up to the start of
     the current segment.  Rollback = cache.crop(ck) -- the prompt and the good
@@ -147,7 +153,11 @@ def prove(
     t0 = time.time()
     canary_name, canary_fn = resolve_canary(canary)
     gen = torch.Generator(device="cpu").manual_seed(seed)
-    input_ids = encode_prompt(prompt, tokenizer).to(model.device)
+    input_ids = (
+        encode_messages(messages, tokenizer)
+        if messages is not None
+        else encode_prompt(prompt, tokenizer)
+    ).to(model.device)
     prompt_len = input_ids.shape[1]
 
     cache = DynamicCache()
