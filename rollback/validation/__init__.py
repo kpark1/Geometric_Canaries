@@ -1,4 +1,3 @@
-from validation.aggregate import aae_trace, nom_trace
 from validation.schema import (
     CanaryScoreRecord,
     Grade,
@@ -29,9 +28,7 @@ __all__ = [
     "GradeRecord",
     "Segment",
     "TraceRecord",
-    "aae_trace",
     "grade_path",
-    "nom_trace",
     "read_grade",
     "read_score",
     "read_trace",

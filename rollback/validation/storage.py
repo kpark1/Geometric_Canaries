@@ -15,9 +15,9 @@ from validation.schema import (
 )
 
 RESULTS_ROOT_ENV = "GEOMETRIC_CANARIES_RESULTS_ROOT"
-DEFAULT_RESULTS_ROOT = (
-    Path.home() / "nobackup" / "autodelete" / "Geometric_Canaries" / "results"
-)
+# Repo-relative default (gitignored). Machine-specific roots (e.g. scratch)
+# belong in the override env var, not hard-coded in this shared repo.
+DEFAULT_RESULTS_ROOT = Path(__file__).resolve().parents[2] / "results"
 
 
 def results_root() -> Path:

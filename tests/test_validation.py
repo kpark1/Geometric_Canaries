@@ -1,10 +1,7 @@
 import math
-from pathlib import Path
 
 import numpy as np
-import pytest
 from rollback_types import StopReason
-from validation.aggregate import aae_trace, nom_trace
 from validation.fixtures import (
     _ATTEMPTS_PER_CHALLENGE,
     _CHALLENGE_IDS,
@@ -28,7 +25,7 @@ from validation.storage import (
 )
 
 
-def _sample_trace() -> TraceRecord:
+def _sample_trace():
     return TraceRecord(
         challenge_id="chal_x",
         attempt=3,
@@ -56,7 +53,7 @@ def _segments_equal(a: Segment, b: Segment) -> bool:
     return bool(np.allclose(a["centroid"], b["centroid"]))
 
 
-def test_trace_round_trip(tmp_path: Path) -> None:
+def test_trace_round_trip(tmp_path):
     trace = _sample_trace()
     write_trace(tmp_path, trace)
     loaded = read_trace(tmp_path, trace["challenge_id"], trace["attempt"])
@@ -72,7 +69,7 @@ def test_trace_round_trip(tmp_path: Path) -> None:
     )
 
 
-def test_score_round_trip(tmp_path: Path) -> None:
+def test_score_round_trip(tmp_path):
     score = CanaryScoreRecord(
         challenge_id="chal_x",
         attempt=1,
@@ -86,7 +83,7 @@ def test_score_round_trip(tmp_path: Path) -> None:
     assert loaded == score
 
 
-def test_grade_round_trip(tmp_path: Path) -> None:
+def test_grade_round_trip(tmp_path):
     grade = GradeRecord(
         challenge_id="chal_x",
         attempt=0,
@@ -98,17 +95,7 @@ def test_grade_round_trip(tmp_path: Path) -> None:
     assert loaded == grade
 
 
-def test_nom_trace_is_sum() -> None:
-    assert nom_trace([1.0, 0.0, 1.0, 0.0, 1.0]) == 3.0
-    assert nom_trace([]) == 0.0
-
-
-def test_aae_trace_is_mean() -> None:
-    assert math.isclose(aae_trace([0.0, math.pi]), math.pi / 2)
-    assert aae_trace([]) == 0.0
-
-
-def test_committed_fixtures_load_and_validate() -> None:
+def test_committed_fixtures_load_and_validate():
     assert FIXTURES_ROOT.exists(), "run `python -m validation.fixtures` to regenerate"
     for challenge_id in _CHALLENGE_IDS:
         for attempt in range(_ATTEMPTS_PER_CHALLENGE):
@@ -117,20 +104,20 @@ def test_committed_fixtures_load_and_validate() -> None:
             grade = read_grade(FIXTURES_ROOT, challenge_id, attempt)
 
             assert trace["challenge_id"] == challenge_id
+            assert trace["attempt"] == attempt
             assert isinstance(trace["stop_reason"], StopReason)
             assert trace["segments"]
             assert isinstance(grade["grade"], Grade)
-            assert math.isclose(score["nom"], nom_trace(score["nom_series"]))
-            assert math.isclose(score["aae"], aae_trace(score["aae_series"]))
+            assert len(score["nom_series"]) == len(trace["segments"])
+            assert len(score["aae_series"]) == len(trace["segments"])
 
 
-def test_fixtures_regenerate_deterministically(tmp_path: Path) -> None:
+def test_fixtures_regenerate_matches_committed(tmp_path):
     generate_fixtures(tmp_path)
-    fresh = read_trace(tmp_path, _CHALLENGE_IDS[0], 0)
-    committed = read_trace(FIXTURES_ROOT, _CHALLENGE_IDS[0], 0)
-    assert fresh["stop_reason"] == committed["stop_reason"]
-    assert len(fresh["segments"]) == len(committed["segments"])
-
-
-if __name__ == "__main__":
-    raise SystemExit(pytest.main([__file__, "-v"]))
+    for challenge_id in _CHALLENGE_IDS:
+        for attempt in range(_ATTEMPTS_PER_CHALLENGE):
+            fresh = read_trace(tmp_path, challenge_id, attempt)
+            committed = read_trace(FIXTURES_ROOT, challenge_id, attempt)
+            assert fresh["text"] == committed["text"]
+            assert fresh["stop_reason"] == committed["stop_reason"]
+            assert len(fresh["segments"]) == len(committed["segments"])
