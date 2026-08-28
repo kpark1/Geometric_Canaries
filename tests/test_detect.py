@@ -1,10 +1,28 @@
 import numpy as np
 import pytest
-from detect import CANARIES, get_canary, resolve_canary, smell_canary
+from detect import (
+    BACKTRACK_MARKERS,
+    CANARIES,
+    average_angle_error_canary,
+    get_canary,
+    number_of_mistakes_canary,
+    resolve_canary,
+    smell_canary,
+)
 
 
-def make_segment(smell: bool = False, mean_entropy: float = 1.0, centroid=None):
-    return {"smell": smell, "mean_entropy": mean_entropy, "centroid": centroid}
+def make_segment(
+    smell: bool = False,
+    mean_entropy: float = 1.0,
+    centroid=None,
+    text: str = "",
+):
+    return {
+        "smell": smell,
+        "mean_entropy": mean_entropy,
+        "centroid": centroid,
+        "text": text,
+    }
 
 
 def make_history_entry(mean_entropy: float, centroid=None):
@@ -14,6 +32,12 @@ def make_history_entry(mean_entropy: float, centroid=None):
 class TestCanaryRegistry:
     def test_smell_is_registered(self):
         assert CANARIES["smell"] is smell_canary
+
+    def test_aae_is_registered(self):
+        assert CANARIES["aae"] is average_angle_error_canary
+
+    def test_nom_is_registered(self):
+        assert CANARIES["nom"] is number_of_mistakes_canary
 
     def test_get_canary_returns_registered_callable(self):
         assert get_canary("smell") is smell_canary
@@ -31,7 +55,7 @@ class TestCanaryRegistry:
         monkeypatch.setitem(CANARIES, "mistake_count", mistake_count_canary)
 
         assert get_canary("mistake_count") is mistake_count_canary
-        assert sorted(CANARIES) == ["mistake_count", "smell"]
+        assert "mistake_count" in CANARIES
 
 
 class TestResolveCanary:
@@ -106,3 +130,192 @@ class TestSmellCanary:
         # should not raise even though this segment has no centroid
         score = smell_canary(make_segment(mean_entropy=1.0, centroid=None), history)
         assert isinstance(score, float)
+
+
+class TestAverageAngleErrorCanary:
+    def test_needs_at_least_three_centroids(self):
+        history = [make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0]))]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([2.0, 0.0])), history
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_respects_warmup_parameter(self):
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([float(i), 0.0]))
+            for i in range(3)
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([3.0, 0.0])), history, warmup=3
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_straight_trajectory_scores_near_zero(self):
+        # centroids walking in a straight line: displacements never turn
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([float(i), 0.0]))
+            for i in range(3)
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([3.0, 0.0])), history
+        )
+        # arccos is numerically steep near 0/pi, so use a looser tolerance here
+        # than the exact right-angle case below
+        assert score == pytest.approx(0.0, abs=1e-3)
+
+    def test_reversed_trajectory_scores_near_pi(self):
+        # centroid doubles back the way it came: a sharp, suspicious turn
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([0.0, 0.0])),
+            make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0])),
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([0.0, 0.0])), history
+        )
+        assert score == pytest.approx(np.pi, abs=1e-3)
+
+    def test_right_angle_turn_scores_near_half_pi(self):
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([0.0, 0.0])),
+            make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0])),
+        ]
+        score = average_angle_error_canary(
+            make_segment(centroid=np.array([1.0, 1.0])), history
+        )
+        assert score == pytest.approx(np.pi / 2, abs=1e-6)
+
+    def test_missing_centroid_returns_zero(self):
+        history = [
+            make_history_entry(mean_entropy=1.0, centroid=np.array([float(i), 0.0]))
+            for i in range(3)
+        ]
+        score = average_angle_error_canary(make_segment(centroid=None), history)
+        assert score == pytest.approx(0.0)
+
+
+def mixed_jump_history():
+    """Four segments whose consecutive centroids drift a little, not a lot --
+    enough for number_of_mistakes_canary's jump-percentile threshold to sit
+    above zero, so "small jump" and "big jump" test cases are unambiguous."""
+    return [
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0])),
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.1])),
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, -0.1])),
+        make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.1])),
+    ]
+
+
+class TestNumberOfMistakesCanary:
+    def test_no_marker_scores_zero_even_with_a_jump(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(centroid=np.array([0.0, 1.0]), text="so we conclude x=1"),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_marker_without_a_jump_scores_zero(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([1.0, 0.1]),  # same direction as the last centroid
+                text="wait, let's double check",
+            ),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_marker_with_a_jump_scores_one(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([0.0, 1.0]),  # sharply off the run's direction
+                text="wait, that's not right",
+            ),
+            history,
+        )
+        assert score == pytest.approx(1.0)
+
+    def test_respects_warmup_parameter(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(centroid=np.array([0.0, 1.0]), text="wait, that's not right"),
+            history,
+            warmup=len(history),
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_missing_centroid_scores_zero(self):
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(centroid=None, text="wait, that's not right"), history
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_no_jump_distribution_yet_scores_zero(self):
+        history = [make_history_entry(mean_entropy=1.0, centroid=np.array([1.0, 0.0]))]
+        score = number_of_mistakes_canary(
+            make_segment(centroid=np.array([0.0, 1.0]), text="wait, that's not right"),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_generic_discourse_connectives_are_not_markers(self):
+        """ "However"/"instead" are excluded on purpose -- see BACKTRACK_MARKERS."""
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([0.0, 1.0]),
+                text="However, instead of that approach, we try another way",
+            ),
+            history,
+        )
+        assert score == pytest.approx(0.0)
+
+    def test_explicit_error_specific_phrase_is_a_mistake(self):
+        """ "sign error" isn't in the grounded research list -- it's from the
+        explicit tier in backtrack_markers.yaml, specific enough to be low-noise."""
+        history = mixed_jump_history()
+        score = number_of_mistakes_canary(
+            make_segment(
+                centroid=np.array([0.0, 1.0]),
+                text="that's a sign error in the last step",
+            ),
+            history,
+        )
+        assert score == pytest.approx(1.0)
+
+
+class TestBacktrackMarkers:
+    """Loader-level checks on the compiled pattern from backtrack_markers.yaml."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Wait, that's not right.",
+            "hmm, let me look at this again",
+            "actually, no, that's a sign error",
+            "let me reconsider this step",
+            "we ran into a problem with the substitution",
+        ],
+    )
+    def test_matches_known_markers(self, text):
+        assert BACKTRACK_MARKERS.search(text)
+
+    def test_punctuation_terminated_marker_matches(self):
+        # regression: a marker ending in a non-word char (":") needs a
+        # non-word lookaround, not \b -- \b would require a word character
+        # right after the colon, which never happens before whitespace/EOF
+        assert BACKTRACK_MARKERS.search("Correction: that step was wrong.")
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "However, instead of that approach, we proceed directly.",
+            "Actually this follows immediately from the definition.",
+            "The error bound is within tolerance.",
+            "We are still awaiting the next step.",  # shouldn't match "wait"
+        ],
+    )
+    def test_does_not_match_generic_prose(self, text):
+        assert not BACKTRACK_MARKERS.search(text)

@@ -56,12 +56,40 @@ def _token_index_at_char(
     char_index: int,
     tokenizer: Any,
 ) -> int:
-    """Map a decoded character boundary to an exclusive token index."""
-    for i in range(len(ids)):
-        prefix = tokenizer.decode(ids[: i + 1], skip_special_tokens=True)
-        if len(prefix) >= char_index:
-            return i + 1
-    return len(ids)
+    """Map a decoded character boundary to an exclusive token index.
+
+    Binary search: decoded length is monotonic in prefix length, so this
+    needs O(log n) decode calls instead of a linear scan that re-decodes the
+    whole growing prefix at every step (O(n) decode calls, each themselves
+    O(n) -- quadratic overall).
+    """
+    lo, hi = 0, len(ids)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        prefix_len = len(tokenizer.decode(ids[: mid + 1], skip_special_tokens=True))
+        if prefix_len >= char_index:
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo + 1 if lo < len(ids) else len(ids)
+
+
+def _abandoned_token_count(mode: str, abandoned: list[dict[str, Any]]) -> int:
+    """Count sampling decisions spent on abandoned branches, without double-counting.
+
+    Each abandoned branch's "ids" is captured *before* that intervention, so it
+    includes the good prefix before the flagged segment as well as the flagged
+    suffix. In restart mode the prefix is thrown away (state.reset()), so the
+    full length is genuinely abandoned. In rollback mode the prefix survives
+    (state.truncate() keeps it) and is already counted via the final
+    state.token_count, so only the flagged suffix -- from segment_start_tok
+    onward -- should count here.
+    """
+    if mode == "rollback":
+        return sum(
+            len(branch["ids"]) - branch["segment_start_tok"] for branch in abandoned
+        )
+    return sum(len(branch["ids"]) for branch in abandoned)
 
 
 @torch.no_grad()
@@ -410,9 +438,7 @@ def prove(
         "rollbacks": stats.rollbacks,
         "n_forward": stats.n_forward,
         "n_prefills": stats.n_prefills,
-        "gen_tokens": (
-            state.token_count + sum(len(branch["ids"]) for branch in stats.abandoned)
-        ),
+        "gen_tokens": state.token_count + _abandoned_token_count(mode, stats.abandoned),
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
         "lean_status": lean_status,
