@@ -12,15 +12,34 @@ DSP_HEADER = "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 400000\n\
 # drop them before showing the code to the model.
 BENCHMARK_MARKER = re.compile(r"^[ \t]*-- !benchmark @(?:start|end).*\n?", re.MULTILINE)
 
+# Verina ships the reference proof inline: the `proof` region holds the body of the
+# main `..._spec_satisfied` theorem and the `proof_aux` region holds supporting
+# lemmas. Both leak the answer, so replace the main proof body with `sorry` and drop
+# the aux lemmas. `(?!_aux)` keeps `proof` from matching `proof_aux`; non-greedy
+# matching pairs each start marker with its own end marker.
+PROOF_REGION = re.compile(
+    r"(-- !benchmark @start proof(?!_aux)[^\n]*\n).*?"
+    r"(^[ \t]*-- !benchmark @end proof(?!_aux)[^\n]*\n?)",
+    re.DOTALL | re.MULTILINE,
+)
+PROOF_AUX_REGION = re.compile(
+    r"-- !benchmark @start proof_aux[^\n]*\n.*?^[ \t]*-- !benchmark @end proof_aux[^\n]*\n?",
+    re.DOTALL | re.MULTILINE,
+)
+
 
 def _clean_lean_code(lean_code: str) -> str:
-    return BENCHMARK_MARKER.sub("", lean_code).strip()
+    without_proof = PROOF_REGION.sub(r"\1  sorry\n\2", lean_code)
+    without_aux = PROOF_AUX_REGION.sub("", without_proof)
+    return BENCHMARK_MARKER.sub("", without_aux).strip()
 
 
 def load_verina_challenges(limit: int | None = None) -> list[Challenge]:
     """Load Verina examples as challenges.
 
-    Each ``lean_code`` is a full Lean file ending in a
+    Verina embeds its reference proof inline, so ``_clean_lean_code`` strips the
+    main ``..._spec_satisfied`` proof body back to ``sorry`` and drops the helper
+    lemmas; each ``lean_code`` is then a full Lean file ending in a
     ``theorem ..._spec_satisfied ... := by sorry`` that the model must complete.
     Verina has no buggy/fixed distinction, so every challenge is ``buggy=False``.
     ``limit <= 0`` (or ``None``) loads all examples.
