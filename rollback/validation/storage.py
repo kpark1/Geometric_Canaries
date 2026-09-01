@@ -3,14 +3,12 @@ import os
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from rollback_types import StopReason
 
 from validation.schema import (
     CanaryScoreRecord,
     Grade,
     GradeRecord,
-    Segment,
     TraceRecord,
 )
 
@@ -46,32 +44,11 @@ def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def _segment_to_json(segment: Segment) -> dict[str, Any]:
-    centroid = segment["centroid"]
-    return {
-        "text": segment["text"],
-        "centroid": None if centroid is None else centroid.tolist(),
-        "mean_entropy": segment["mean_entropy"],
-        "smell": segment["smell"],
-    }
-
-
-def _segment_from_json(data: dict[str, Any]) -> Segment:
-    centroid = data["centroid"]
-    return Segment(
-        text=data["text"],
-        centroid=None if centroid is None else np.asarray(centroid, dtype=np.float64),
-        mean_entropy=data["mean_entropy"],
-        smell=data["smell"],
-    )
-
-
 def write_trace(root: Path, trace: TraceRecord) -> Path:
     payload: dict[str, Any] = {
         "challenge_id": trace["challenge_id"],
         "attempt": trace["attempt"],
         "text": trace["text"],
-        "segments": [_segment_to_json(s) for s in trace["segments"]],
         "stop_reason": trace["stop_reason"].value,
     }
     return _write_json(
@@ -85,7 +62,6 @@ def read_trace(root: Path, challenge_id: str, attempt: int) -> TraceRecord:
         challenge_id=data["challenge_id"],
         attempt=data["attempt"],
         text=data["text"],
-        segments=[_segment_from_json(s) for s in data["segments"]],
         stop_reason=StopReason(data["stop_reason"]),
     )
 

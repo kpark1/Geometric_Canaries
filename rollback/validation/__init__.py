@@ -2,7 +2,6 @@ from validation.schema import (
     CanaryScoreRecord,
     Grade,
     GradeRecord,
-    Segment,
     TraceRecord,
 )
 from validation.storage import (
@@ -26,7 +25,6 @@ __all__ = [
     "CanaryScoreRecord",
     "Grade",
     "GradeRecord",
-    "Segment",
     "TraceRecord",
     "grade_path",
     "read_grade",

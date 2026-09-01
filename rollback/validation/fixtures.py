@@ -1,13 +1,11 @@
 from pathlib import Path
 
-import numpy as np
 from rollback_types import StopReason
 
 from validation.schema import (
     CanaryScoreRecord,
     Grade,
     GradeRecord,
-    Segment,
     TraceRecord,
 )
 from validation.storage import write_grade, write_score, write_trace
@@ -18,20 +16,6 @@ _CHALLENGE_IDS = ("chal_add_comm", "chal_le_trans", "chal_nat_zero")
 _ATTEMPTS_PER_CHALLENGE = 2
 
 
-def _seg(
-    text: str,
-    centroid: list[float] | None,
-    mean_entropy: float,
-    smell: bool,
-) -> Segment:
-    return Segment(
-        text=text,
-        centroid=None if centroid is None else np.array(centroid, dtype=np.float64),
-        mean_entropy=mean_entropy,
-        smell=smell,
-    )
-
-
 # Hardcoded synthetic records: one valid, one invalid, one incomplete grade, and
 # both stop reasons, so downstream tickets see every schema shape.
 _FIXTURES: tuple[tuple[TraceRecord, CanaryScoreRecord, GradeRecord], ...] = (
@@ -40,10 +24,6 @@ _FIXTURES: tuple[tuple[TraceRecord, CanaryScoreRecord, GradeRecord], ...] = (
             challenge_id="chal_add_comm",
             attempt=0,
             text="theorem add_comm (a b : Nat) : a + b = b + a := by\n  ring\n",
-            segments=[
-                _seg("  intro a b\n", [0.10, -0.20, 0.30], 0.80, False),
-                _seg("  ring\n", [0.12, -0.18, 0.28], 0.55, False),
-            ],
             stop_reason=StopReason.EOS,
         ),
         CanaryScoreRecord(
@@ -66,10 +46,6 @@ _FIXTURES: tuple[tuple[TraceRecord, CanaryScoreRecord, GradeRecord], ...] = (
             challenge_id="chal_add_comm",
             attempt=1,
             text="theorem add_comm (a b : Nat) : a + b = b + a := by\n  sorry\n",
-            segments=[
-                _seg("  intro a b\n", [0.09, -0.21, 0.31], 0.90, False),
-                _seg("  sorry\n", None, 1.40, True),
-            ],
             stop_reason=StopReason.EOS,
         ),
         CanaryScoreRecord(
@@ -92,10 +68,6 @@ _FIXTURES: tuple[tuple[TraceRecord, CanaryScoreRecord, GradeRecord], ...] = (
             challenge_id="chal_le_trans",
             attempt=0,
             text="theorem le_trans ... := by\n  omega\n",
-            segments=[
-                _seg("  intro h1 h2\n", [-0.40, 0.10, 0.05], 0.70, False),
-                _seg("  omega\n", [-0.38, 0.12, 0.02], 0.50, False),
-            ],
             stop_reason=StopReason.EOS,
         ),
         CanaryScoreRecord(
@@ -118,10 +90,6 @@ _FIXTURES: tuple[tuple[TraceRecord, CanaryScoreRecord, GradeRecord], ...] = (
             challenge_id="chal_le_trans",
             attempt=1,
             text="theorem le_trans ... := by\n  intro h1 h2\n  exact",
-            segments=[
-                _seg("  intro h1 h2\n", [-0.41, 0.09, 0.06], 0.95, False),
-                _seg("  exact", [-0.30, 0.20, 0.10], 1.60, False),
-            ],
             stop_reason=StopReason.MAX_NEW_TOKENS,
         ),
         CanaryScoreRecord(
@@ -144,9 +112,6 @@ _FIXTURES: tuple[tuple[TraceRecord, CanaryScoreRecord, GradeRecord], ...] = (
             challenge_id="chal_nat_zero",
             attempt=0,
             text="theorem nat_zero (n : Nat) : n + 0 = n := by\n  simp\n",
-            segments=[
-                _seg("  simp\n", [0.50, 0.50, -0.10], 0.40, False),
-            ],
             stop_reason=StopReason.EOS,
         ),
         CanaryScoreRecord(
@@ -169,10 +134,6 @@ _FIXTURES: tuple[tuple[TraceRecord, CanaryScoreRecord, GradeRecord], ...] = (
             challenge_id="chal_nat_zero",
             attempt=1,
             text="theorem nat_zero (n : Nat) : n + 0 = n := by\n  induction n\n  admit\n",
-            segments=[
-                _seg("  induction n\n", [0.48, 0.52, -0.12], 0.65, False),
-                _seg("  admit\n", None, 1.20, True),
-            ],
             stop_reason=StopReason.EOS,
         ),
         CanaryScoreRecord(
