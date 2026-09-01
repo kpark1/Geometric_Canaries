@@ -40,6 +40,8 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from agent import agent_prove
+from detect import CANARIES
 from draw import plot_timeline
 from evaluate import run_eval
 from model import load_model_runtime
@@ -274,6 +276,24 @@ def main() -> None:
         help="generation limit per attempt (default: 2048)",
     )
     parser.add_argument(
+        "--canary",
+        choices=sorted(CANARIES),
+        default="smell",
+        help="signal used to score segments for intervention (default: smell)",
+    )
+    parser.add_argument(
+        "--agentic",
+        action="store_true",
+        help="use a tool-enabled agent (multi-turn, checked via Lean) instead "
+        "of a single-attempt no-tools generation",
+    )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=3,
+        help="turn budget for --agentic (default: 3); ignored otherwise",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="use the small model for a quick run",
@@ -340,12 +360,21 @@ def main() -> None:
         device_request=DEVICE_REQUEST,
     )
 
-    prove = partial(
-        run_proof,
-        model=model,
-        tokenizer=tokenizer,
-        capture_layer=capture_layer,
-    )
+    if args.agentic:
+        prove = partial(
+            agent_prove,
+            model=model,
+            tokenizer=tokenizer,
+            capture_layer=capture_layer,
+            max_turns=args.max_turns,
+        )
+    else:
+        prove = partial(
+            run_proof,
+            model=model,
+            tokenizer=tokenizer,
+            capture_layer=capture_layer,
+        )
     run_rollback_eval = partial(
         run_eval,
         challenges,
@@ -357,6 +386,7 @@ def main() -> None:
         res = prove(
             build_prompt(challenge),
             mode="rollback",
+            canary=args.canary,
             max_new_tokens=args.max_new_tokens,
             thresh=1.8,
             seed=0,
@@ -368,7 +398,11 @@ def main() -> None:
         return
 
     # Lowering the threshold below zero guarantees interventions.
-    df = run_rollback_eval(max_new_tokens=args.max_new_tokens, thresh=-1.0)
+    df = run_rollback_eval(
+        max_new_tokens=args.max_new_tokens,
+        thresh=-1.0,
+        canary=args.canary,
+    )
     save_result(FILEDIR, results, result_name, df)
     show_eval_result(df)
     total_time = time.perf_counter() - start_time
