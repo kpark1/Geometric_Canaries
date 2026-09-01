@@ -8,6 +8,7 @@ dependencies = [
     "matplotlib>=3.9,<4",
     "numpy>=1.26,<3",
     "pandas>=2.2,<3",
+    "pyyaml>=6.0,<7",
     "torch==2.7.1",
     "transformers>=4.46,<5",
 ]
@@ -32,6 +33,7 @@ explicit = true
 
 [dependency-groups]
 dev = [
+    "pytest>=8.3",
     "ruff>=0.16.2",
     "ty>=0.0.70",
 ]
@@ -41,6 +43,11 @@ ignore = [
     "BLE001", # Allow broad exceptions for tokenizer fallback
     "DTZ005", # Allow timezone-naive local timestamps for result filenames
 ]
+
+[tool.pytest.ini_options]
+# rollback/*.py uses flat imports (e.g. `from detect import ...`) since it's run
+# as a script with sys.path[0] == rollback/; mirror that here for tests.
+pythonpath = ["rollback"]
 
 [tool.pyright]
 # rollback/*.py is run as a script, so sys.path[0] is rollback/ at runtime;

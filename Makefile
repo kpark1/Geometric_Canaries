@@ -1,8 +1,8 @@
 CHECK_FILES := $(shell git ls-files '*.py' '*.ipynb')
 
-.PHONY: check lint format-check type-check
+.PHONY: check lint format-check type-check test
 
-check: lint format-check type-check
+check: lint format-check type-check test
 
 lint:
 	uv run ruff check $(CHECK_FILES)
@@ -12,3 +12,6 @@ format-check:
 
 type-check:
 	uv run ty check $(CHECK_FILES) --python .venv/ --error-on-warning
+
+test:
+	uv run pytest

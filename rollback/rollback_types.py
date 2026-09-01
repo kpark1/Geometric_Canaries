@@ -24,6 +24,7 @@ NO_PROOF_FOUND: NoProofFound = "no proof found"
 
 class ProveRunResult(TypedDict):
     mode: str  # TODO
+    canary: str
     prompt: str
     text: str
     ids: list[int]
@@ -40,6 +41,14 @@ class ProveRunResult(TypedDict):
     stop_reason: StopReason
     wall_s: float
     lean_status: ResponseLeanStatus
+
+
+class AgentProveRunResult(ProveRunResult):
+    """prove_fn-compatible result from agent.agent_prove: a ProveRunResult with
+    cost/event fields summed across all turns, plus per-turn history."""
+
+    turns: int
+    turn_history: list[dict[str, Any]]
 
 
 @dataclass

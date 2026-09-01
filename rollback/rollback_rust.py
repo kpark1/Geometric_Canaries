@@ -8,7 +8,7 @@ DSP_HEADER = "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 400000\n\
 
 
 def load_fixture(filename: str) -> str:
-    return (FIXTURE_DIR / filename).read_text().rstrip()
+    return (FIXTURE_DIR / filename).read_text(encoding="utf-8").rstrip()
 
 
 def rust_comment(name: str) -> str:

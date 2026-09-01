@@ -1,0 +1,91 @@
+# Backtrack markers for detect.py's number_of_mistakes_canary: phrases that
+# signal a recognised, self-corrected error mid-reasoning.
+#
+# grounded: drawn from published reasoning-trace research, not hand-picked.
+#   - "wait" is causally shown to trigger self-correction on math reasoning
+#     (Muennighoff et al., "s1: Simple Test-Time Scaling", arXiv:2501.19393 --
+#     forcing "Wait" beat "Hmm" and no-extrapolation on AIME24).
+#   - the rest are drawn from the empirically frequent reflection markers in
+#     Table 1 of "Revisiting Anthropomorphic Reflection Markers in LLM
+#     Reasoning" (arXiv:2605.28305), restricted to entries specific enough to
+#     use as a plain substring match -- that paper's full list also includes
+#     generic function words ("I", "we", "try", "let", "using", "again",
+#     "maybe", "consider", ...) that are too common in ordinary proof prose
+#     to serve as a useful signal here.
+grounded:
+  - wait
+  - alternatively
+  - hmm
+  - umm
+  - oh
+  - oops
+  - aha
+
+# explicit: not backed by either paper above, but specific and unambiguous
+# enough to be low-noise -- they name a caught mistake, an interruption, or a
+# restart directly rather than just signalling hesitation. Deliberately
+# excludes generic discourse connectives ("however", "instead", bare
+# "actually", bare "no", bare "error" -- proofs talk about "error bounds" and
+# "error terms" all the time) that show up constantly in ordinary proof prose
+# for reasons unrelated to a mistake.
+#
+# Also excludes any phrase that's just a grounded marker plus filler
+# ("wait a second", "oh no", "actually, wait", ...) -- those add no coverage
+# beyond the bare grounded word, which already matches as a substring.
+explicit:
+  # naming the mistake
+  - "mistake"
+  - "an error"
+  - "my error"
+  - "miscalculated"
+  - "miscalculation"
+  - "arithmetic error"
+  - "algebra error"
+  - "sign error"
+  - "computational error"
+  - "calculation error"
+  - "I was wrong"
+  - "was mistaken"
+  - "I misread"
+  - "I misunderstood"
+  - "I misspoke"
+
+  # naming the flaw / realizing a step doesn't hold up
+  - "that's wrong"
+  - "that is wrong"
+  - "that's incorrect"
+  - "that is incorrect"
+  - "that's not right"
+  - "that is not right"
+  - "this isn't right"
+  - "this is not right"
+  - "that can't be right"
+  - "that cannot be right"
+  - "this doesn't work"
+  - "this does not work"
+  - "this won't work"
+  - "that won't work"
+  - "doesn't work here"
+  - "this fails"
+  - "this breaks down"
+  - "there's a problem"
+  - "there's an issue"
+  - "ran into a problem"
+  - "ran into an issue"
+
+  # interrupting to go back
+  - "hold on"
+  - "hang on"
+  - "on second thought"
+  - "actually, no"
+
+  # redoing the step
+  - "scratch that"
+  - "start over"
+  - "back to the drawing board"
+  - "try a different approach"
+  - "try another approach"
+  - "let me correct"
+  - "let me fix"
+  - "correction:"
+  - "let me re" # prefix: reconsider/recheck/redo/recompute/rewrite/reread/revise
