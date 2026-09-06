@@ -46,8 +46,8 @@ from draw import plot_timeline
 from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback_rust import LEAN_MODELS, build_prompt
-from rollback_types import NO_PROOF_FOUND, LeanStatus, ProveRunResult
+from rollback_types import NO_PROOF_FOUND, Challenge, LeanStatus, ProveRunResult
+from verina import build_prompt, load_verina_challenges
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
@@ -55,38 +55,8 @@ PROJECT_CACHE = os.path.join(
 # DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 FILEDIR = Path(__file__).parent / "log"
-SINGLE_EXAMPLE_INDEX = 1
-"""## Dataset — 3 Aeneas-style minimal pairs
-
-Each item is a (fixed, buggy) pair in the Aeneas-faithful Lean subset (`Result` monad,
-fallible machine-integer ops) with a spec that is provable for the fixed variant and
-false for the buggy one. Three bug families kept for the prototype: loop progress
-(`binary_search`), underflow panic (`sat_sub`), flipped comparison (`clamp`). The full
-mutation + real-advisory dataset from the previous notebook drops back in unchanged once
-the loop is trusted — `prove()` only needs `build_prompt(item, variant)`.
-"""
-
-MINIMAL_PAIRS = []
-for name, m in LEAN_MODELS.items():
-    MINIMAL_PAIRS.append(
-        {
-            "id": name,
-            "bug_type": m["bug_type"],
-            "provenance": "mutation",
-            "real_world_analogue": m["real_world_analogue"],
-            "fixed": {"defn": m["fixed_defn"], "spec": m["spec"], "provable": True},
-            "buggy": {"defn": m["buggy_defn"], "spec": m["spec"], "provable": False},
-        }
-    )
-
-
-pair_ids: list[str] = []
-for pair in MINIMAL_PAIRS:
-    pair_id = pair["id"]
-    assert isinstance(pair_id, str)
-    pair_ids.append(pair_id)
-
-print(f"{len(MINIMAL_PAIRS)} minimal pairs: " + ", ".join(pair_ids))
+SINGLE_EXAMPLE_INDEX = 2
+DEFAULT_LIMIT = 5
 
 """## Segmentation and the bad-logic detector
 
@@ -130,7 +100,7 @@ entropy).
 
 """## Evaluation — does checkpointing help, and is it cheaper?
 
-3 items × 2 variants × 3 modes × seeds. Two questions, two tables:
+Two questions, two tables:
 
 1. **Detection/steering** — outcome by variant and mode. On *buggy* items the desired
    outcome is `claims_false` (the spec is false); on *fixed* items, `claims_proof`.
@@ -154,7 +124,7 @@ def stop_reason_label(stop_reason: str) -> str:
 
 def show_single_result(
     res: ProveRunResult,
-    item: dict[str, Any],
+    challenge: Challenge,
 ) -> None:
     """Print and plot one generated proof result."""
     print(
@@ -173,7 +143,7 @@ def show_single_result(
         print("\n--- prompt ---\n", res["prompt"])
     print("\n--- final text ---\n", res["text"])
     print("-" * 50)
-    plot_timeline(res, title=f"{item['id']} / buggy / rollback")
+    plot_timeline(res, title=f"{challenge['id']} / rollback")
 
 
 def show_run_generations(df: pd.DataFrame) -> None:
@@ -187,8 +157,7 @@ def show_run_generations(df: pd.DataFrame) -> None:
     print("=" * 50)
     for _, row in df.iterrows():
         print(
-            f"\n=== {row['id']} / {row['variant']} / {row['mode']} "
-            f"seed={row['seed']} ==="
+            f"\n=== {row['id']} / {row['buggy']} / {row['mode']} seed={row['seed']} ==="
         )
         print(
             f"outcome={row['outcome']}  interventions={row['interventions']}  "
@@ -211,8 +180,8 @@ def show_eval_result(df: pd.DataFrame) -> None:
     # Keep the comparison table readable when text/prompt are present.
     summary_cols = [c for c in df.columns if c not in ("text", "prompt", "events")]
     print(df[summary_cols].to_string(index=False))
-    print("\nOutcome by variant x mode:")
-    outcome_table = pd.crosstab([df.variant, df["mode"]], df.outcome).reindex(
+    print("\nOutcome by bugginess x mode:")
+    outcome_table = pd.crosstab([df.buggy, df["mode"]], df.outcome).reindex(
         columns=[member.value for member in LeanStatus] + [NO_PROOF_FOUND],
         fill_value=0,
     )
@@ -341,6 +310,15 @@ def main() -> None:
             "load log/result_<TIMESTAMP>.pkl instead of running (e.g. 20260803_221329)"
         ),
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_LIMIT,
+        help=(
+            f"number of Verina examples to load (default: {DEFAULT_LIMIT}; "
+            "<= 0 loads all)"
+        ),
+    )
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.WARNING,
@@ -350,6 +328,12 @@ def main() -> None:
         logging.getLogger("prove").setLevel(logging.DEBUG)
     print(f"Max new tokens: {args.max_new_tokens}")
     result_name = "single_example" if args.single_example else "full_eval"
+
+    challenges = load_verina_challenges(limit=args.limit)
+    print(
+        f"{len(challenges)} challenges: "
+        + ", ".join(challenge["id"] for challenge in challenges)
+    )
 
     if args.single_example:
         print(f"{SINGLE_EXAMPLE_INDEX=}")
@@ -362,7 +346,7 @@ def main() -> None:
         print(f"Using cached result: {result_name=}, {saved_at=}")
         # print(f'{result=}')
         if args.single_example:
-            show_single_result(result, MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX])
+            show_single_result(result, challenges[SINGLE_EXAMPLE_INDEX])
         else:
             show_eval_result(result)
         total_time = time.perf_counter() - start_time
@@ -393,14 +377,14 @@ def main() -> None:
         )
     run_rollback_eval = partial(
         run_eval,
-        MINIMAL_PAIRS,
+        challenges,
         build_prompt,
         prove,
     )
     if args.single_example:
-        item = MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]
+        challenge = challenges[SINGLE_EXAMPLE_INDEX]
         res = prove(
-            build_prompt(item, "buggy"),
+            build_prompt(challenge),
             mode="rollback",
             canary=args.canary,
             max_new_tokens=args.max_new_tokens,
@@ -408,7 +392,7 @@ def main() -> None:
             seed=0,
         )
         save_result(FILEDIR, results, result_name, res)
-        show_single_result(res, item)
+        show_single_result(res, challenge)
         total_time = time.perf_counter() - start_time
         print(f"{total_time=:.1f}")
         return

@@ -63,3 +63,9 @@ class ProcessTimeout:
 
 
 type ProcessResultOrTimeout = ProcessResult | ProcessTimeout
+
+
+class Challenge(TypedDict):
+    id: str
+    lean_code: str
+    buggy: bool

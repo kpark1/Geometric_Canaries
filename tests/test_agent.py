@@ -2,7 +2,7 @@ from functools import partial
 
 from agent import agent_prove
 from evaluate import run_eval
-from rollback_rust import build_prompt
+from verina import build_prompt
 from rollback_types import LeanStatus, ProveRunResult
 
 
@@ -161,18 +161,11 @@ class TestAgentProve:
         assert set(ProveRunResult.__annotations__) <= set(result)
 
 
-FAKE_ITEM = {
+FAKE_CHALLENGE = {
     "id": "fake_bug",
-    "fixed": {
-        "defn": "def foo (n : Nat) : Nat := n",
-        "spec": "theorem foo_id (n : Nat) : foo n = n := by rfl",
-        "provable": True,
-    },
-    "buggy": {
-        "defn": "def foo (n : Nat) : Nat := n + 1",
-        "spec": "theorem foo_id (n : Nat) : foo n = n := by rfl",
-        "provable": False,
-    },
+    "lean_code": "def foo (n : Nat) : Nat := n\n"
+    "theorem foo_id (n : Nat) : foo n = n := by sorry",
+    "buggy": False,
 }
 
 
@@ -180,11 +173,9 @@ class TestAgentProveThroughRunEval:
     """agent_prove, wired through the real run_eval + build_prompt, the same way
     rollback.py's CLI wires it -- confirms the two modules actually compose."""
 
-    def test_run_eval_produces_one_row_per_variant_mode_seed(self):
-        # run_eval calls prove_fn once per (variant, mode, seed); two variants here
-        fake_prove = make_fake_prove(
-            [lean4_block("attempt 1"), lean4_block("attempt 1")]
-        )
+    def test_run_eval_produces_one_row_per_challenge_mode_seed(self):
+        # run_eval calls prove_fn once per (challenge, mode, seed)
+        fake_prove = make_fake_prove([lean4_block("attempt 1")])
         prove_fn = partial(
             agent_prove,
             model=None,
@@ -196,7 +187,7 @@ class TestAgentProveThroughRunEval:
         )
 
         df = run_eval(
-            [FAKE_ITEM],
+            [FAKE_CHALLENGE],
             build_prompt,
             prove_fn,
             modes=("plain",),
@@ -204,7 +195,7 @@ class TestAgentProveThroughRunEval:
             canary="smell",
         )
 
-        assert len(df) == 2  # fixed + buggy variants
-        assert set(df["variant"]) == {"fixed", "buggy"}
+        assert len(df) == 1
+        assert (df["buggy"] == False).all()  # noqa: E712
         assert (df["outcome"] == LeanStatus.OK).all()
         assert (df["canary"] == "smell").all()
