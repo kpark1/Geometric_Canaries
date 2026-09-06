@@ -1,0 +1,24 @@
+{
+  "challenge_id": "chal_add_comm",
+  "attempt": 1,
+  "text": "theorem add_comm (a b : Nat) : a + b = b + a := by\n  sorry\n",
+  "segments": [
+    {
+      "text": "  intro a b\n",
+      "centroid": [
+        0.09,
+        -0.21,
+        0.31
+      ],
+      "mean_entropy": 0.9,
+      "smell": false
+    },
+    {
+      "text": "  sorry\n",
+      "centroid": null,
+      "mean_entropy": 1.4,
+      "smell": true
+    }
+  ],
+  "stop_reason": "eos"
+}

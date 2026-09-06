@@ -1,0 +1,28 @@
+{
+  "challenge_id": "chal_le_trans",
+  "attempt": 1,
+  "text": "theorem le_trans ... := by\n  intro h1 h2\n  exact",
+  "segments": [
+    {
+      "text": "  intro h1 h2\n",
+      "centroid": [
+        -0.41,
+        0.09,
+        0.06
+      ],
+      "mean_entropy": 0.95,
+      "smell": false
+    },
+    {
+      "text": "  exact",
+      "centroid": [
+        -0.3,
+        0.2,
+        0.1
+      ],
+      "mean_entropy": 1.6,
+      "smell": false
+    }
+  ],
+  "stop_reason": "max_new_tokens"
+}

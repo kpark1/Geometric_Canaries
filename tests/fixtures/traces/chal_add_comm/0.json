@@ -1,0 +1,28 @@
+{
+  "challenge_id": "chal_add_comm",
+  "attempt": 0,
+  "text": "theorem add_comm (a b : Nat) : a + b = b + a := by\n  ring\n",
+  "segments": [
+    {
+      "text": "  intro a b\n",
+      "centroid": [
+        0.1,
+        -0.2,
+        0.3
+      ],
+      "mean_entropy": 0.8,
+      "smell": false
+    },
+    {
+      "text": "  ring\n",
+      "centroid": [
+        0.12,
+        -0.18,
+        0.28
+      ],
+      "mean_entropy": 0.55,
+      "smell": false
+    }
+  ],
+  "stop_reason": "eos"
+}

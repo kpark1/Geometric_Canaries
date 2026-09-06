@@ -1,0 +1,28 @@
+{
+  "challenge_id": "chal_le_trans",
+  "attempt": 0,
+  "text": "theorem le_trans ... := by\n  omega\n",
+  "segments": [
+    {
+      "text": "  intro h1 h2\n",
+      "centroid": [
+        -0.4,
+        0.1,
+        0.05
+      ],
+      "mean_entropy": 0.7,
+      "smell": false
+    },
+    {
+      "text": "  omega\n",
+      "centroid": [
+        -0.38,
+        0.12,
+        0.02
+      ],
+      "mean_entropy": 0.5,
+      "smell": false
+    }
+  ],
+  "stop_reason": "eos"
+}

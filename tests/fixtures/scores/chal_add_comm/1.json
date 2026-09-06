@@ -1,0 +1,14 @@
+{
+  "challenge_id": "chal_add_comm",
+  "attempt": 1,
+  "nom": 1.0,
+  "aae": 1.35,
+  "nom_series": [
+    0.0,
+    1.0
+  ],
+  "aae_series": [
+    0.3,
+    2.4
+  ]
+}

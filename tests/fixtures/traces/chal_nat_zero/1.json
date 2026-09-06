@@ -1,0 +1,24 @@
+{
+  "challenge_id": "chal_nat_zero",
+  "attempt": 1,
+  "text": "theorem nat_zero (n : Nat) : n + 0 = n := by\n  induction n\n  admit\n",
+  "segments": [
+    {
+      "text": "  induction n\n",
+      "centroid": [
+        0.48,
+        0.52,
+        -0.12
+      ],
+      "mean_entropy": 0.65,
+      "smell": false
+    },
+    {
+      "text": "  admit\n",
+      "centroid": null,
+      "mean_entropy": 1.2,
+      "smell": true
+    }
+  ],
+  "stop_reason": "eos"
+}

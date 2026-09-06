@@ -1,0 +1,6 @@
+{
+  "challenge_id": "chal_nat_zero",
+  "attempt": 1,
+  "grade": "invalid",
+  "detail": "comparator rejected: admit-cheat detected"
+}

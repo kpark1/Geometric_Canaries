@@ -1,0 +1,18 @@
+{
+  "challenge_id": "chal_nat_zero",
+  "attempt": 0,
+  "text": "theorem nat_zero (n : Nat) : n + 0 = n := by\n  simp\n",
+  "segments": [
+    {
+      "text": "  simp\n",
+      "centroid": [
+        0.5,
+        0.5,
+        -0.1
+      ],
+      "mean_entropy": 0.4,
+      "smell": false
+    }
+  ],
+  "stop_reason": "eos"
+}

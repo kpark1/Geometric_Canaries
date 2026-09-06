@@ -54,3 +54,8 @@ pythonpath = ["rollback"]
 # rollback/*.py is run as a script, so sys.path[0] is rollback/ at runtime;
 # mirror that here so flat imports (e.g. `from lean import ...`) resolve.
 extraPaths = ["rollback"]
+
+[tool.ty.environment]
+# Mirror pyright's extraPaths so the ty type-checker resolves the same flat
+# rollback/-rooted imports from tests outside that directory.
+extra-paths = ["rollback"]

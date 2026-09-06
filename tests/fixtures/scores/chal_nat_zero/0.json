@@ -1,0 +1,12 @@
+{
+  "challenge_id": "chal_nat_zero",
+  "attempt": 0,
+  "nom": 0.0,
+  "aae": 0.1,
+  "nom_series": [
+    0.0
+  ],
+  "aae_series": [
+    0.1
+  ]
+}
