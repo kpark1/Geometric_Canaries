@@ -73,8 +73,8 @@ def build_prompt(
 ) -> str:
     code_block = (DSP_HEADER if use_mathlib_header else "") + challenge["lean_code"]
     return (
-        "Complete the following Lean 4 code by replacing the `sorry` with a "
-        "complete proof:\n\n```lean4\n" + code_block + "\n```\n\n"
+        "Complete the following Lean 4 code by filling in the missing proof:"
+        "\n\n```lean4\n" + code_block + "\n```\n\n"
         "Before producing the Lean 4 code to formally prove the given theorem, "
         "provide a detailed proof plan outlining the main proof steps and "
         "strategies.\n"
