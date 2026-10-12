@@ -310,6 +310,12 @@ def main() -> None:
         help="use the small model for a quick run",
     )
     parser.add_argument(
+        "--model-id",
+        type=str,
+        default="",
+        help="type model ids w/ format: organization/model-id e.g. deepseek-ai/DeepSeek-Prover-V2-7B",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="show detailed generation and rollback state",
@@ -354,6 +360,7 @@ def main() -> None:
         PROJECT_CACHE,
         dry_run=args.dry_run,
         device_request=DEVICE_REQUEST,
+        model_id=args.model_id,
     )
 
     prove = partial(
