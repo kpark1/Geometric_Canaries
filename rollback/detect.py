@@ -1,18 +1,33 @@
+from __future__ import annotations
+
 import re
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 
-# Handle both standard newlines and byte-level BPE newlines ('Ċ')
-BOUNDARY_PATTERN = re.compile(
-    r"[\nĊ]\s*[\nĊ]"
-    r"|[\nĊ](?=Step \d)"
-    r"|[\nĊ](?=\d+[\.)]\s)"
-    r"|[\nĊ](?=```)"
-    r"|[\nĊ](?=(?:First|Second|Next|Then|Now|Finally|Therefore|Thus)[,\s])"
-    r"|[\nĊ](?=\s*<;>)",
-    flags=re.IGNORECASE,
-)
+"""Patterns that can be used to find boundaries in the generated text.
+
+The dictionary keys are names for the patterns so that we can choose which
+ones to use and also see which one found a boundary. ``\n`` is a regular
+newline, while ``Ċ`` is how a newline may appear when looking at Byte Pair
+Encoding tokens. ``find_boundary`` checks every enabled pattern and uses the
+earliest match. If patterns match at the same place, the order in ``enabled``
+decides which one to use. If ``enabled`` is not specified, the dictionary order
+is used.
+"""
+BOUNDARY_PATTERNS: dict[str, re.Pattern[str]] = {
+    "eoseg": re.compile(r"^[ \t]*EOSEG[ \t]*$", re.IGNORECASE | re.MULTILINE),
+    "blank_line": re.compile(r"[\nĊ]\s*[\nĊ]"),
+    "step": re.compile(r"[\nĊ](?=Step \d)", re.IGNORECASE),
+    "numbered": re.compile(r"[\nĊ](?=\d+[.)]\s)"),
+    "code_block": re.compile(r"[\nĊ](?=```)"),
+    "transition": re.compile(
+        r"[\nĊ](?=(?:First|Second|Next|Then|Now|Finally|Therefore|Thus)[,\s])",
+        re.IGNORECASE,
+    ),
+    "legacy_marker": re.compile(r"[\nĊ](?=\s*<;>)"),
+}
 
 # prevents extremely short segments
 MIN_SEGMENT_TOKENS = 8
@@ -29,16 +44,34 @@ LEXICAL_SMELLS = re.compile(
 def find_boundary(
     text: str,
     from_char: int,
-    boundary_pattern: re.Pattern = BOUNDARY_PATTERN,
-) -> int | None:
-    m = boundary_pattern.search(text, from_char)
-    if m:
-        return m.end()
+    enabled: Sequence[str] = tuple(BOUNDARY_PATTERNS),
+) -> tuple[int, str] | None:
+    """Look for the next boundary in the generated text.
 
-    nl1 = text.find("\n", from_char + 100)
-    nl2 = text.find("Ċ", from_char + 100)
-    nls = [n for n in (nl1, nl2) if n != -1]
-    return min(nls) + 1 if nls else None
+    ``text`` is all of the text generated so far, and ``from_char`` is the
+    character position where the search should start. Note that ``from_char``
+    is a character position, not a token number. ``enabled`` contains the names
+    of the boundary patterns to check.
+
+    Returns:
+        ``(boundary_char, kind)`` when a boundary is found.
+        ``boundary_char`` is the character position just after the matched boundary,
+        and ``kind`` is the name of the pattern that matched. It returns ``None`` if
+        none of the enabled patterns find a boundary.
+    """
+    matches = []
+    for priority, kind in enumerate(enabled):
+        pattern = BOUNDARY_PATTERNS[kind]
+        match = pattern.search(text, from_char)
+        if match:
+            print(f'{kind=}, {match.start()=}, {match.end()=}')
+            matches.append((match.start(), priority, match.end(), kind))
+
+    if matches:
+        _, _, boundary_char, kind = min(matches)
+        return boundary_char, kind
+
+    return None
 
 
 def cosine_dist(a: np.ndarray, b: np.ndarray) -> float:

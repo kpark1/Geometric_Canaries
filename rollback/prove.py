@@ -11,16 +11,15 @@ from detect import (
     find_boundary,
     score_segment,
 )
-from prompt import encode_prompt
-from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
-from state import RunStats, State, Token
-from transformers import DynamicCache
-
 from lean import (
     DEFAULT_TIMEOUT_S,
     extract_lean_deepseek_prover_style,
     lean_elaborates_no_sorry,
 )
+from prompt import encode_prompt
+from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
+from state import RunStats, State, Token
+from transformers import DynamicCache
 
 HINT = (
     "\nWait -- let me re-check the last step carefully before continuing. "
@@ -194,14 +193,16 @@ def prove(
             stop_reason = StopReason.EOS
             break
 
-        boundary_char = find_boundary(state.text, state.probe_char)
+        boundary = find_boundary(state.text, state.probe_char)
         logger.debug(
             "boundary search: probe_char=%d result=%r",
             state.probe_char,
-            boundary_char,
+            boundary,
         )
 
-        if boundary_char is not None:
+        if boundary is not None:
+            boundary_char, boundary_kind = boundary
+            logger.debug("boundary detected: kind=%s", boundary_kind)
             seg_end_tok = _token_index_at_char(
                 state.ids,
                 boundary_char,

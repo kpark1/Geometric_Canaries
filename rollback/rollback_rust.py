@@ -61,12 +61,19 @@ def build_prompt(
         + v["spec"]
     )
     return (
-        "Complete the following Lean 4 code:\n\n```lean4\n" + code_block + "\n```\n\n"
+        "Complete the following Lean 4 code:\n\n"
+        "```lean4\n" + code_block + "\n```\n\n"
         "Before producing the Lean 4 code to formally prove the given theorem, "
         "provide a detailed proof plan outlining the main proof steps and "
         "strategies.\n"
         "The plan should highlight key ideas, intermediate lemmas, and proof "
         "structures that will guide the construction of the final formal proof. "
         "If the statement is false, state this explicitly and give a concrete "
-        "counterexample instead of a proof."
+        "counterexample instead of a proof.\n\n"
+        "IMPORTANT: In the proof plan, end every reasoning sentence or proposed "
+        "Lean statement with the exact marker `EOSEG`. Place the marker immediately "
+        "after the sentence or statement. For example:\n"
+        "1. **Claim:** Unfold the function definition. EOSEG\n"
+        "2. **Case split:** Split on the condition used by the function. EOSEG\n"
+        "Do not add `EOSEG` inside the final Lean code."
     )

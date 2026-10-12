@@ -8,6 +8,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ -f "$REPO_ROOT/scripts/lean.env" ]]; then
+    source "$REPO_ROOT/scripts/lean.env"
+fi
+
 # Hyphenated so the directory can never be imported as a Python module and
 # shadow rollback/lean.py.
 LEAN_DIR="$REPO_ROOT/lean-project"
