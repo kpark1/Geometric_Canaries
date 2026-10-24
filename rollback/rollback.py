@@ -45,7 +45,7 @@ from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
 from rollback_rust import LEAN_MODELS, build_prompt
-from rollback_types import NO_PROOF_FOUND, LeanStatus, ProveRunResult
+from rollback_types import NO_PROOF_FOUND, LeanStatus
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
@@ -150,30 +150,6 @@ def stop_reason_label(stop_reason: str) -> str:
     return labels.get(stop_reason, str(stop_reason))
 
 
-def show_single_result(
-    res: ProveRunResult,
-    item: dict[str, Any],
-) -> None:
-    """Print and plot one generated proof result."""
-    print(
-        f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
-        f"segments={len(res['segments'])}"
-    )
-    print(
-        f"forward passes: {res['n_forward']}  "
-        f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s"
-    )
-    print(f"stopped: {stop_reason_label(res.get('stop_reason', 'unknown'))}")
-    for event in res["events"]:
-        print("  event:", event)
-    print("\noutcome:", res["lean_status"])
-    if res.get("prompt") is not None:
-        print("\n--- prompt ---\n", res["prompt"])
-    print("\n--- final text ---\n", res["text"])
-    print("-" * 50)
-    plot_timeline(res, title=f"{item['id']} / buggy / rollback")
-
-
 def show_run_generations(df: pd.DataFrame) -> None:
     """Print the prompt, events, and generated text for every evaluation run."""
     if "text" not in df.columns:
@@ -205,9 +181,22 @@ def show_run_generations(df: pd.DataFrame) -> None:
 
 
 def show_eval_result(df: pd.DataFrame) -> None:
-    """Print summary tables, then each run's events and final text."""
+    """Display either one proof run or a multi-run evaluation."""
+    if len(df) == 1:
+        row = df.iloc[0]
+        show_run_generations(df)
+        result = row.get("raw_result")
+        if result is not None:
+            plot_timeline(
+                result,
+                title=f"{row['id']} / {row['variant']} / {row['mode']}",
+            )
+        return
+
     # Keep the comparison table readable when text/prompt are present.
-    summary_cols = [c for c in df.columns if c not in ("text", "prompt", "events")]
+    summary_cols = [
+        c for c in df.columns if c not in ("text", "prompt", "events", "raw_result")
+    ]
     print(df[summary_cols].to_string(index=False))
     print("\nOutcome by variant x mode:")
     outcome_table = pd.crosstab([df.variant, df["mode"]], df.outcome).reindex(
@@ -227,9 +216,11 @@ def show_eval_result(df: pd.DataFrame) -> None:
         )
         .round(1)
     )
-    comp["saved_vs_restart_fw"] = (
-        comp.loc["restart", "fw_passes"] - comp["fw_passes"]
-    ).round(0)
+    # A single-example run contains only rollback, so it has no restart baseline.
+    if "restart" in comp.index:
+        comp["saved_vs_restart_fw"] = (
+            comp.loc["restart", "fw_passes"] - comp["fw_passes"]
+        ).round(0)
     print(comp)
 
     show_run_generations(df)
@@ -342,13 +333,16 @@ def main() -> None:
 
     if args.load_saved:
         results = load_result(FILEDIR, args.load_saved)
+        if not args.single_example and "full_eval" not in results:
+            result_name = "single_example"
         saved = results[result_name]
         result = saved["result"]
         saved_at = saved["saved_at"]
         print(f"Using cached result: {result_name=}, {saved_at=}")
         # print(f'{result=}')
-        if args.single_example:
-            show_single_result(result, MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX])
+        if result_name == "single_example" and not isinstance(result, pd.DataFrame):
+            item = MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]
+            plot_timeline(result, title=f"{item['id']} / buggy / rollback")
         else:
             show_eval_result(result)
         total_time = time.perf_counter() - start_time
@@ -369,29 +363,31 @@ def main() -> None:
         tokenizer=tokenizer,
         capture_layer=capture_layer,
     )
-    run_rollback_eval = partial(
-        run_eval,
-        MINIMAL_PAIRS,
+    if args.single_example:
+        items = [MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]]
+        variants = ("buggy",)
+        # Match the original single-example behavior: one rollback run with seed 0.
+        modes = ("rollback",)
+        seeds = (0,)
+        thresh = 1.8
+    else:
+        items = MINIMAL_PAIRS
+        variants = ("fixed", "buggy")
+        modes = ("plain", "rollback", "restart")
+        seeds = (0, 1)
+        # Lowering the threshold below zero guarantees interventions.
+        thresh = -1.0
+
+    df = run_eval(
+        items,
         build_prompt,
         prove,
+        variants=variants,
+        modes=modes,
+        seeds=seeds,
+        max_new_tokens=args.max_new_tokens,
+        thresh=thresh,
     )
-    if args.single_example:
-        item = MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]
-        res = prove(
-            build_prompt(item, "buggy"),
-            mode="rollback",
-            max_new_tokens=args.max_new_tokens,
-            thresh=1.8,
-            seed=0,
-        )
-        save_result(FILEDIR, results, result_name, res)
-        show_single_result(res, item)
-        total_time = time.perf_counter() - start_time
-        print(f"{total_time=:.1f}")
-        return
-
-    # Lowering the threshold below zero guarantees interventions.
-    df = run_rollback_eval(max_new_tokens=args.max_new_tokens, thresh=-1.0)
     save_result(FILEDIR, results, result_name, df)
     show_eval_result(df)
     total_time = time.perf_counter() - start_time

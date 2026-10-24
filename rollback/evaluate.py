@@ -26,6 +26,7 @@ def run_eval(
     items: list[dict[str, Any]],
     build_prompt_fn: Callable[..., str],
     prove_fn: Callable[..., ProveRunResult],
+    variants: tuple[str, ...] = ("fixed", "buggy"),
     modes: tuple[str, ...] = ("plain", "rollback", "restart"),
     seeds: tuple[int, ...] = (0, 1),
     max_new_tokens: int = 384,
@@ -33,7 +34,7 @@ def run_eval(
 ) -> pd.DataFrame:
     rows = []
     for item in items:
-        for variant in ("fixed", "buggy"):
+        for variant in variants:
             prompt = build_prompt_fn(item, variant)
             for mode in modes:
                 for seed in seeds:
@@ -61,6 +62,7 @@ def run_eval(
                             "n_forward": result["n_forward"],
                             "prefills": result["n_prefills"],
                             "wall_s": result["wall_s"],
+                            "raw_result": result,
                         }
                     )
     return pd.DataFrame(rows)
