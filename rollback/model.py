@@ -43,9 +43,29 @@ def load_model_runtime(
     elif not dry_run:
         print("!! no GPU — set DRY_RUN = True or switch runtime")
 
+    if not model_id:
+        model_id = (
+            "Qwen/Qwen2.5-0.5B-Instruct"
+            if dry_run
+            else "deepseek-ai/DeepSeek-Prover-V2-7B"
+        )
+
+    allowed_model_ids = {
+        "deepseek-ai/DeepSeek-Prover-V2-7B",
+        "AI-MO/Kimina-Prover-RL-1.7B",
+        "XiaomiMiMo/MiMo-7B-RL",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "Goedel-LM/Goedel-Prover-V2-32",
+    }
+    if not dry_run and model_id not in allowed_model_ids:
+        raise ValueError(
+            f"Unsupported model: {model_id}. "
+            f"Choose one of: {sorted(allowed_model_ids)}"
+        )
+
+    trust_remote_code = model_id == "XiaomiMiMo/MiMo-7B-RL"
+
     if dry_run:
-        model_id = "Qwen/Qwen2.5-0.5B-Instruct"
-        trust_remote_code = False
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             dtype=model_dtype,
@@ -54,22 +74,6 @@ def load_model_runtime(
             trust_remote_code=trust_remote_code,
         )
     else:
-        allowed_model_ids = {
-            "deepseek-ai/DeepSeek-Prover-V2-7B",
-            "AI-MO/Kimina-Prover-RL-1.7B",
-            "XiaomiMiMo/MiMo-7B-RL",
-            "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        }
-
-        if not model_id:
-            model_id = "deepseek-ai/DeepSeek-Prover-V2-7B"
-        elif model_id not in allowed_model_ids:
-            raise ValueError(
-                f"Unsupported model: {model_id}. "
-                f"Choose one of: {sorted(allowed_model_ids)}"
-            )
-
-        trust_remote_code = model_id == "XiaomiMiMo/MiMo-7B-RL"
         bnb = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=model_dtype,
@@ -90,7 +94,7 @@ def load_model_runtime(
         cache_dir=huggingface_cache,
         trust_remote_code=trust_remote_code,
     )
-    print(f"Using {model_id=}")
+
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
