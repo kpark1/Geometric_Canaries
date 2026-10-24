@@ -36,6 +36,7 @@ HINT = (
     "I should verify each claim against the definitions.\n"
 )
 
+
 def _sample(
     logits: torch.Tensor,
     temperature: float,
@@ -96,6 +97,151 @@ def _abandoned_token_count(mode: str, abandoned: list[dict[str, Any]]) -> int:
             len(branch["ids"]) - branch["segment_start_tok"] for branch in abandoned
         )
     return sum(len(branch["ids"]) for branch in abandoned)
+
+
+def _advance_model(
+    model: Any,
+    cache: DynamicCache,
+    token_id: int,
+    stats: RunStats,
+) -> tuple[Any, torch.Tensor]:
+    """Process one generated token and return the next-token logits."""
+    next_token = torch.tensor([[token_id]], device=model.device)
+    out = model(
+        input_ids=next_token,
+        past_key_values=cache,
+        use_cache=True,
+        output_hidden_states=True,
+    )
+    stats.add_forward(1)
+    return out, out.logits[0, -1].float()
+
+
+def _rollback_to_segment_start(
+    prompt_len: int,
+    segment: dict[str, Any],
+    cache: DynamicCache,
+    state: State,
+    tokenizer: Any,
+    stats: RunStats,
+) -> int:
+    """Crop the cache and generation state to a flagged segment's start."""
+    checkpoint = prompt_len + segment["tok_start"]
+    cache.crop(checkpoint)
+    state.truncate(segment["tok_start"], tokenizer)
+    stats.record_rollback(segment)
+    return checkpoint
+
+
+def _inject_hint(
+    model: Any,
+    tokenizer: Any,
+    cache: DynamicCache,
+    state: State,
+    stats: RunStats,
+    capture_layer: int,
+) -> tuple[Any, torch.Tensor] | None:
+    """Inject the rollback hint and return the next-token logits."""
+    hint_ids = tokenizer(
+        HINT,
+        add_special_tokens=False,
+    )["input_ids"]
+    if not hint_ids:
+        return None
+
+    hint_tensor = torch.tensor([hint_ids], device=model.device)
+    out = model(
+        input_ids=hint_tensor,
+        past_key_values=cache,
+        use_cache=True,
+        output_hidden_states=True,
+    )
+    stats.add_forward(len(hint_ids))
+
+    hidden_size = out.hidden_states[capture_layer].shape[-1]
+    for hint_token_id in hint_ids:
+        hint_hidden = np.full(hidden_size, np.nan, dtype=np.float32)
+        state.add_token(
+            Token.inject(
+                token_id=hint_token_id,
+                hidden=hint_hidden,
+            )
+        )
+
+    state.decode(tokenizer)
+    state.seg_start_tok = state.token_count
+    state.seg_start_char = len(state.text)
+    state.probe_char = len(state.text)
+    return out, out.logits[0, -1].float()
+
+
+def _resume_after_rollback(
+    model: Any,
+    cache: DynamicCache,
+    checkpoint: int,
+    input_ids: torch.Tensor,
+    state: State,
+    stats: RunStats,
+) -> tuple[Any, torch.Tensor]:
+    """Rebuild the final cache position and resume after a rollback."""
+    cache.crop(checkpoint - 1)
+    if state.ids:
+        last_token = torch.tensor([[state.ids[-1]]], device=model.device)
+    else:
+        last_token = input_ids[:, -1:]
+
+    out = model(
+        input_ids=last_token,
+        past_key_values=cache,
+        use_cache=True,
+        output_hidden_states=True,
+    )
+    stats.add_forward(1)
+    state.seg_start_tok = state.token_count
+    state.seg_start_char = len(state.text)
+    state.probe_char = len(state.text)
+    return out, out.logits[0, -1].float()
+
+
+def _restart_generation(
+    model: Any,
+    input_ids: torch.Tensor,
+    prompt_len: int,
+    segment: dict[str, Any],
+    state: State,
+    stats: RunStats,
+    history: list[dict[str, Any]],
+    segments: list[dict[str, Any]],
+) -> tuple[DynamicCache, Any, torch.Tensor]:
+    """Restart generation from the prompt after a flagged segment."""
+    cache = DynamicCache()
+    out = model(
+        input_ids=input_ids,
+        past_key_values=cache,
+        use_cache=True,
+        output_hidden_states=True,
+    )
+    stats.add_forward(prompt_len)
+    stats.n_prefills += 1
+    stats.record_restart(segment)
+    state.reset()
+    history.clear()
+    segments.clear()
+    return cache, out, out.logits[0, -1].float()
+
+
+def _accept_segment(
+    segment: dict[str, Any],
+    history: list[dict[str, Any]],
+    segments: list[dict[str, Any]],
+    state: State,
+) -> None:
+    """Keep a segment and move the next segment start past it."""
+    history.append(segment)
+    segments.append(segment)
+    state.seg_start_tok = segment["tok_end"]
+    state.seg_start_char = segment["char_end"]
+    state.probe_char = segment["char_end"]
 
 
 @torch.no_grad()
@@ -220,154 +366,94 @@ def prove(
 
         boundary_char = find_boundary(state.text, state.probe_char)
         log_boundary_search(state.probe_char, boundary_char)
+        found_boundary = boundary_char is not None
 
-        if boundary_char is not None:
-            seg_end_tok = _token_index_at_char(
-                state.ids,
-                boundary_char,
-                tokenizer,
-            )
-            segment_token_count = seg_end_tok - state.seg_start_tok
+        # Keep generating until a natural segment boundary appears.
+        if not found_boundary:
+            out, logits = _advance_model(model, cache, tok, stats)
+            continue
 
-            if segment_token_count < MIN_SEGMENT_TOKENS:
-                state.probe_char = boundary_char
-                log_boundary_rejected(segment_token_count, MIN_SEGMENT_TOKENS)
-            else:
-                segment = close_segment(seg_end_tok, boundary_char)
-                flagged = segment["score"] > thresh
-                log_segment(segment, flagged)
-
-                # Should the program reject this segment and perform the
-                # configured intervention?
-                should_intervene = (
-                    flagged and mode != "plain" and stats.rollbacks < max_rollbacks
-                )
-                if should_intervene:
-                    stats.rollbacks += 1
-                    stats.abandoned.append(
-                        {
-                            "segment_start_tok": segment["tok_start"],
-                            "segment_end_tok": segment["tok_end"],
-                            "text": state.text,
-                            "ids": list(state.ids),
-                            "entropy": [t.entropy for t in state.tokens],
-                            "logprob": [t.logprob for t in state.tokens],
-                        }
-                    )
-
-                    if mode == "rollback":
-                        checkpoint = prompt_len + segment["tok_start"]
-                        cache.crop(checkpoint)
-                        state.truncate(segment["tok_start"], tokenizer)
-                        stats.events.append(
-                            {
-                                "type": "rollback",
-                                "to_tok": segment["tok_start"],
-                                "score": segment["score"],
-                            }
-                        )
-
-                        hint_ids = []
-                        if inject_hint:
-                            hint_ids = tokenizer(
-                                HINT,
-                                add_special_tokens=False,
-                            )["input_ids"]
-
-                        if hint_ids:
-                            hint_tensor = torch.tensor(
-                                [hint_ids],
-                                device=model.device,
-                            )
-                            out = model(
-                                input_ids=hint_tensor,
-                                past_key_values=cache,
-                                use_cache=True,
-                                output_hidden_states=True,
-                            )
-                            stats.add_forward(len(hint_ids))
-
-                            hidden_size = out.hidden_states[capture_layer].shape[-1]
-                            for hint_token_id in hint_ids:
-                                hint_hidden = np.full(
-                                    hidden_size,
-                                    np.nan,
-                                    dtype=np.float32,
-                                )
-                                state.add_token(
-                                    Token.inject(
-                                        token_id=hint_token_id,
-                                        hidden=hint_hidden,
-                                    )
-                                )
-
-                            state.decode(tokenizer)
-                            state.seg_start_tok = state.token_count
-                            state.seg_start_char = len(state.text)
-                            state.probe_char = len(state.text)
-                            logits = out.logits[0, -1].float()
-                            continue
-
-                        cache.crop(checkpoint - 1)
-                        if state.ids:
-                            last_token = torch.tensor(
-                                [[state.ids[-1]]],
-                                device=model.device,
-                            )
-                        else:
-                            last_token = input_ids[:, -1:]
-
-                        out = model(
-                            input_ids=last_token,
-                            past_key_values=cache,
-                            use_cache=True,
-                            output_hidden_states=True,
-                        )
-                        stats.add_forward(1)
-                        state.seg_start_tok = state.token_count
-                        state.seg_start_char = len(state.text)
-                        state.probe_char = len(state.text)
-                        logits = out.logits[0, -1].float()
-                        continue
-
-                    if mode == "restart":
-                        cache = DynamicCache()
-                        out = model(
-                            input_ids=input_ids,
-                            past_key_values=cache,
-                            use_cache=True,
-                            output_hidden_states=True,
-                        )
-                        stats.add_forward(prompt_len)
-                        stats.n_prefills += 1
-                        stats.events.append(
-                            {
-                                "type": "restart",
-                                "score": segment["score"],
-                            }
-                        )
-                        logits = out.logits[0, -1].float()
-                        state.reset()
-                        history.clear()
-                        segments.clear()
-                        continue
-
-                history.append(segment)
-                segments.append(segment)
-                state.seg_start_tok = segment["tok_end"]
-                state.seg_start_char = segment["char_end"]
-                state.probe_char = segment["char_end"]
-
-        next_token = torch.tensor([[tok]], device=model.device)
-        out = model(
-            input_ids=next_token,
-            past_key_values=cache,
-            use_cache=True,
-            output_hidden_states=True,
+        seg_end_tok = _token_index_at_char(
+            state.ids,
+            boundary_char,
+            tokenizer,
         )
-        logits = out.logits[0, -1].float()
-        stats.add_forward(1)
+        segment_token_count = seg_end_tok - state.seg_start_tok
+        segment_is_long = segment_token_count >= MIN_SEGMENT_TOKENS
 
+        # Ignore short fragments and continue through the next boundary.
+        if not segment_is_long:
+            state.probe_char = boundary_char
+            log_boundary_rejected(segment_token_count, MIN_SEGMENT_TOKENS)
+            out, logits = _advance_model(model, cache, tok, stats)
+            continue
+
+        segment = close_segment(seg_end_tok, boundary_char)
+        segment_is_flagged = segment["score"] > thresh
+        log_segment(segment, segment_is_flagged)
+
+        # Decide whether and how to reject the completed segment.
+        can_intervene = mode != "plain" and stats.rollbacks < max_rollbacks
+        should_intervene = segment_is_flagged and can_intervene
+        should_rollback = should_intervene and mode == "rollback"
+        should_restart = should_intervene and mode == "restart"
+
+        # Preserve the rejected branch before changing the live generation.
+        if should_intervene:
+            stats.rollbacks += 1
+            stats.record_abandoned_branch(segment, state)
+
+        # Reuse the accepted prefix, optionally adding a corrective hint.
+        if should_rollback:
+            checkpoint = _rollback_to_segment_start(
+                prompt_len=prompt_len,
+                segment=segment,
+                cache=cache,
+                state=state,
+                tokenizer=tokenizer,
+                stats=stats,
+            )
+            if inject_hint:
+                hint_result = _inject_hint(
+                    model=model,
+                    tokenizer=tokenizer,
+                    cache=cache,
+                    state=state,
+                    stats=stats,
+                    capture_layer=capture_layer,
+                )
+                if hint_result is not None:
+                    out, logits = hint_result
+                    continue
+            out, logits = _resume_after_rollback(
+                model=model,
+                cache=cache,
+                checkpoint=checkpoint,
+                input_ids=input_ids,
+                state=state,
+                stats=stats,
+            )
+            continue
+
+        # Recompute from the prompt as the comparison baseline.
+        if should_restart:
+            cache, out, logits = _restart_generation(
+                model=model,
+                input_ids=input_ids,
+                prompt_len=prompt_len,
+                segment=segment,
+                state=state,
+                stats=stats,
+                history=history,
+                segments=segments,
+            )
+            continue
+
+        # Neither intervention continued the loop, so keep this segment.
+        _accept_segment(segment, history, segments, state)
+        out, logits = _advance_model(model, cache, tok, stats)
+
+    # Record any generated text after the last natural boundary.
     if state.token_count - state.seg_start_tok > 0:
         segments.append(close_segment(state.token_count, len(state.text)))
 
