@@ -1,10 +1,19 @@
-import logging
 import time
 from typing import Any
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+from debug_log import (
+    log_boundary_rejected,
+    log_boundary_search,
+    log_eos,
+    log_final_state,
+    log_initial_state,
+    log_sampled_token,
+    log_segment,
+    log_step_start,
+)
 from detect import (
     LEXICAL_SMELLS,
     MIN_SEGMENT_TOKENS,
@@ -26,9 +35,6 @@ HINT = (
     "\nWait -- let me re-check the last step carefully before continuing. "
     "I should verify each claim against the definitions.\n"
 )
-
-logger = logging.getLogger(__name__)
-
 
 def _sample(
     logits: torch.Tensor,
@@ -176,17 +182,7 @@ def prove(
     # Set on early exit; if the loop ends naturally, generation hit the budget.
     stop_reason = StopReason.MAX_NEW_TOKENS
 
-    logger.debug(
-        "initial state: prompt_len=%d step=%d ids=%r text=%r "
-        "seg_start_tok=%d seg_start_char=%d probe_char=%d",
-        prompt_len,
-        state.token_count,
-        state.ids,
-        state.text,
-        state.seg_start_tok,
-        state.seg_start_char,
-        state.probe_char,
-    )
+    log_initial_state(prompt_len, state)
 
     def close_segment(
         seg_end_tok: int,
@@ -201,12 +197,7 @@ def prove(
         return segment
 
     while state.token_count < max_new_tokens:
-        logger.debug(
-            "step %d start: ids_len=%d text_len=%d",
-            state.token_count,
-            len(state.ids),
-            len(state.text),
-        )
+        log_step_start(state)
 
         tok = _sample(logits.cpu(), temperature, top_p, gen)
         predictive_hidden = (
@@ -220,29 +211,15 @@ def prove(
         state.add_token(token)
         state.decode(tokenizer)
 
-        logger.debug(
-            "sampled token: step=%d token_id=%d raw=%r entropy=%r "
-            "logprob=%r hidden_shape=%r text_tail=%r",
-            state.token_count,
-            tok,
-            tokenizer.convert_ids_to_tokens(tok),
-            token.entropy,
-            token.logprob,
-            token.hidden.shape,
-            state.text[-120:],
-        )
+        log_sampled_token(state, token, tokenizer)
 
         if tok == tokenizer.eos_token_id:
-            logger.debug("EOS reached at step %d", state.token_count)
+            log_eos(state)
             stop_reason = StopReason.EOS
             break
 
         boundary_char = find_boundary(state.text, state.probe_char)
-        logger.debug(
-            "boundary search: probe_char=%d result=%r",
-            state.probe_char,
-            boundary_char,
-        )
+        log_boundary_search(state.probe_char, boundary_char)
 
         if boundary_char is not None:
             seg_end_tok = _token_index_at_char(
@@ -254,27 +231,11 @@ def prove(
 
             if segment_token_count < MIN_SEGMENT_TOKENS:
                 state.probe_char = boundary_char
-                logger.debug(
-                    "boundary rejected: token_count=%d minimum=%d",
-                    segment_token_count,
-                    MIN_SEGMENT_TOKENS,
-                )
+                log_boundary_rejected(segment_token_count, MIN_SEGMENT_TOKENS)
             else:
                 segment = close_segment(seg_end_tok, boundary_char)
                 flagged = segment["score"] > thresh
-                logger.debug(
-                    "segment closed: tok_range=(%d, %d) text=%r "
-                    "mean_entropy=%r min_logprob=%r smell=%r "
-                    "score=%r flagged=%r",
-                    segment["tok_start"],
-                    segment["tok_end"],
-                    segment["text"],
-                    segment["mean_entropy"],
-                    segment["min_logprob"],
-                    segment["smell"],
-                    segment["score"],
-                    flagged,
-                )
+                log_segment(segment, flagged)
 
                 # Should the program reject this segment and perform the
                 # configured intervention?
@@ -420,18 +381,7 @@ def prove(
 
     lean_status = _extract_and_check_proof(state.text, timeout_s=timeout_s)
 
-    logger.debug(
-        "final state: ids_len=%d text_len=%d entropy_len=%d "
-        "logprob_len=%d hidden_len=%d segments=%d events=%r rollbacks=%d",
-        len(state.ids),
-        len(state.text),
-        len(entropy),
-        len(logprob),
-        len(hidden),
-        len(segments),
-        stats.events,
-        stats.rollbacks,
-    )
+    log_final_state(state, entropy, logprob, hidden, segments, stats)
 
     return {
         "mode": mode,
