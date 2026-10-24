@@ -1,6 +1,21 @@
 # Geometric_Canaries
 LLM-assisted formal verification pipelines are vulnerable to a critical failure mode: adversarially perturbed theorem statements can steer models toward plausible-but-invalid proofs, with no warning until the proof checker fails. This project applies geometric chain-of-thought analysis to proof generation, using two metrics, Average Angle Error and Number of Mistakes, to detect reasoning instability mid-generation, before the checker is invoked. Both metrics are already validated as adversarial-sensitive in general reasoning 
 
+## Development branches
+
+The branches are listed in order, with each branch based on the one before it.
+
+| Branch | What | Why |
+|---|---|---|
+| `kp/add-model` | Adds selectable model IDs, including `Goedel-LM/Goedel-Prover-V2-32`. | Supports evaluating different proof models without changing the code. |
+| `kp/combine-single-multiple` | Runs single-example and full evaluations through the same configurable evaluation path. | Avoids maintaining separate execution and result-handling paths. |
+| `kp/create-debug-log` | Moves debug logging from `prove.py` into `debug_log.py`. | Keeps the generation loop concise while preserving detailed diagnostics. |
+
+## Before opening a pull request
+
+- [ ] Run `make check`.
+- [ ] Add or update the branch information in this README.
+
 ## Rollback setup
 
 The default rollback command loads the full DeepSeek model with 4-bit
