@@ -1,14 +1,15 @@
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
+from typing import Any
 
 import pandas as pd
-from rollback_types import Challenge, ProveRunResult
-from verina import BuildPromptFunction
+from rollback_types import ProveRunResult
 
 
 def run_eval(
-    challenges: Iterable[Challenge],
-    build_prompt_fn: BuildPromptFunction,
+    challenges: list[dict[str, Any]],
+    build_prompt_fn: Callable[..., str],
     prove_fn: Callable[..., ProveRunResult],
+    variants: tuple[str, ...] = ("fixed", "buggy"),
     modes: tuple[str, ...] = ("plain", "rollback", "restart"),
     seeds: tuple[int, ...] = (0, 1),
     max_new_tokens: int = 384,
@@ -17,23 +18,27 @@ def run_eval(
 ) -> pd.DataFrame:
     rows = []
     for challenge in challenges:
-        prompt = build_prompt_fn(challenge)
-        for mode in modes:
-            for seed in seeds:
-                result = prove_fn(
-                    prompt,
-                    mode=mode,
-                    canary=canary,
-                    max_new_tokens=max_new_tokens,
-                    thresh=thresh,
-                    seed=seed,
-                )
-                rows.append(
-                    {
+        paired = "fixed" in challenge and "buggy" in challenge
+        challenge_variants: tuple[str | None, ...] = variants if paired else (None,)
+        for variant in challenge_variants:
+            prompt = (
+                build_prompt_fn(challenge, variant)
+                if variant is not None
+                else build_prompt_fn(challenge)
+            )
+            for mode in modes:
+                for seed in seeds:
+                    result = prove_fn(
+                        prompt,
+                        mode=mode,
+                        canary=canary,
+                        max_new_tokens=max_new_tokens,
+                        thresh=thresh,
+                        seed=seed,
+                    )
+                    row = {
                         "id": challenge["id"],
-                        "buggy": challenge["buggy"],
                         "mode": mode,
-                        "canary": result["canary"],
                         "seed": seed,
                         "outcome": result["lean_status"],
                         "stop_reason": result["stop_reason"],
@@ -47,5 +52,15 @@ def run_eval(
                         "wall_s": result["wall_s"],
                         "raw_result": result,
                     }
-                )
+                    if variant is not None:
+                        row.update(
+                            variant=variant,
+                            provable=challenge[variant]["provable"],
+                        )
+                    else:
+                        row.update(
+                            buggy=challenge["buggy"],
+                            canary=result["canary"],
+                        )
+                    rows.append(row)
     return pd.DataFrame(rows)
