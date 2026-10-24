@@ -176,9 +176,22 @@ def show_run_generations(df: pd.DataFrame) -> None:
 
 
 def show_eval_result(df: pd.DataFrame) -> None:
-    """Print summary tables, then each run's events and final text."""
+    """Display either one proof run or a multi-run evaluation."""
+    if len(df) == 1:
+        row = df.iloc[0]
+        show_run_generations(df)
+        result = row.get("raw_result")
+        if result is not None:
+            plot_timeline(
+                result,
+                title=f"{row['id']} / buggy={row['buggy']} / {row['mode']}",
+            )
+        return
+
     # Keep the comparison table readable when text/prompt are present.
-    summary_cols = [c for c in df.columns if c not in ("text", "prompt", "events")]
+    summary_cols = [
+        c for c in df.columns if c not in ("text", "prompt", "events", "raw_result")
+    ]
     print(df[summary_cols].to_string(index=False))
     print("\nOutcome by bugginess x mode:")
     outcome_table = pd.crosstab([df.buggy, df["mode"]], df.outcome).reindex(
@@ -198,9 +211,11 @@ def show_eval_result(df: pd.DataFrame) -> None:
         )
         .round(1)
     )
-    comp["saved_vs_restart_fw"] = (
-        comp.loc["restart", "fw_passes"] - comp["fw_passes"]
-    ).round(0)
+    # A single-example run contains only rollback, so it has no restart baseline.
+    if "restart" in comp.index:
+        comp["saved_vs_restart_fw"] = (
+            comp.loc["restart", "fw_passes"] - comp["fw_passes"]
+        ).round(0)
     print(comp)
 
     show_run_generations(df)
@@ -346,12 +361,14 @@ def main() -> None:
 
     if args.load_saved:
         results = load_result(FILEDIR, args.load_saved)
+        if not args.single_example and "full_eval" not in results:
+            result_name = "single_example"
         saved = results[result_name]
         result = saved["result"]
         saved_at = saved["saved_at"]
         print(f"Using cached result: {result_name=}, {saved_at=}")
         # print(f'{result=}')
-        if args.single_example:
+        if args.single_example and not isinstance(result, pd.DataFrame):
             show_single_result(result, challenges[SINGLE_EXAMPLE_INDEX])
         else:
             show_eval_result(result)
@@ -382,32 +399,27 @@ def main() -> None:
             tokenizer=tokenizer,
             capture_layer=capture_layer,
         )
-    run_rollback_eval = partial(
-        run_eval,
-        challenges,
+    if args.single_example:
+        selected_challenges = [challenges[SINGLE_EXAMPLE_INDEX]]
+        # Match the original single-example behavior: one rollback run with seed 0.
+        modes = ("rollback",)
+        seeds = (0,)
+        thresh = 1.8
+    else:
+        selected_challenges = challenges
+        modes = ("plain", "rollback", "restart")
+        seeds = (0, 1)
+        # Lowering the threshold below zero guarantees interventions.
+        thresh = -1.0
+
+    df = run_eval(
+        selected_challenges,
         build_prompt,
         prove,
-    )
-    if args.single_example:
-        challenge = challenges[SINGLE_EXAMPLE_INDEX]
-        res = prove(
-            build_prompt(challenge),
-            mode="rollback",
-            canary=args.canary,
-            max_new_tokens=args.max_new_tokens,
-            thresh=1.8,
-            seed=0,
-        )
-        save_result(FILEDIR, results, result_name, res)
-        show_single_result(res, challenge)
-        total_time = time.perf_counter() - start_time
-        print(f"{total_time=:.1f}")
-        return
-
-    # Lowering the threshold below zero guarantees interventions.
-    df = run_rollback_eval(
+        modes=modes,
+        seeds=seeds,
         max_new_tokens=args.max_new_tokens,
-        thresh=-1.0,
+        thresh=thresh,
         canary=args.canary,
     )
     save_result(FILEDIR, results, result_name, df)

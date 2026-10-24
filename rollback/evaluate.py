@@ -45,6 +45,7 @@ def run_eval(
                         "n_forward": result["n_forward"],
                         "prefills": result["n_prefills"],
                         "wall_s": result["wall_s"],
+                        "raw_result": result,
                     }
                 )
     return pd.DataFrame(rows)
