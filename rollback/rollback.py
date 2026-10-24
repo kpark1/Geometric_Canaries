@@ -46,7 +46,7 @@ from draw import plot_timeline
 from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback_types import NO_PROOF_FOUND, Challenge, LeanStatus, ProveRunResult
+from rollback_types import NO_PROOF_FOUND, LeanStatus
 from verina import build_prompt, load_verina_challenges
 
 PROJECT_CACHE = os.path.join(
@@ -120,30 +120,6 @@ def stop_reason_label(stop_reason: str) -> str:
         "max_new_tokens": "max_new_tokens (hit generation budget)",
     }
     return labels.get(stop_reason, str(stop_reason))
-
-
-def show_single_result(
-    res: ProveRunResult,
-    challenge: Challenge,
-) -> None:
-    """Print and plot one generated proof result."""
-    print(
-        f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
-        f"segments={len(res['segments'])}"
-    )
-    print(
-        f"forward passes: {res['n_forward']}  "
-        f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s"
-    )
-    print(f"stopped: {stop_reason_label(res.get('stop_reason', 'unknown'))}")
-    for event in res["events"]:
-        print("  event:", event)
-    print("\noutcome:", res["lean_status"])
-    if res.get("prompt") is not None:
-        print("\n--- prompt ---\n", res["prompt"])
-    print("\n--- final text ---\n", res["text"])
-    print("-" * 50)
-    plot_timeline(res, title=f"{challenge['id']} / rollback")
 
 
 def show_run_generations(df: pd.DataFrame) -> None:
@@ -368,10 +344,7 @@ def main() -> None:
         saved_at = saved["saved_at"]
         print(f"Using cached result: {result_name=}, {saved_at=}")
         # print(f'{result=}')
-        if args.single_example and not isinstance(result, pd.DataFrame):
-            show_single_result(result, challenges[SINGLE_EXAMPLE_INDEX])
-        else:
-            show_eval_result(result)
+        show_eval_result(result)
         total_time = time.perf_counter() - start_time
         print(f"{total_time=:.1f}")
         return
