@@ -26,6 +26,11 @@ from lean import (
     extract_lean_deepseek_prover_style,
     lean_elaborates_no_sorry,
 )
+from memory_debug import (
+    DECODE_MEMORY_CHECKPOINTS,
+    log_cuda_memory,
+    reset_cuda_peak_memory,
+)
 from prompt import encode_messages, encode_prompt
 from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
 from state import RunStats, State, Token
@@ -107,12 +112,19 @@ def _advance_model(
 ) -> tuple[Any, torch.Tensor]:
     """Process one generated token and return the next-token logits."""
     next_token = torch.tensor([[token_id]], device=model.device)
+    cache_len = cache.get_seq_length()
+    log_checkpoint = cache_len in DECODE_MEMORY_CHECKPOINTS
+    if log_checkpoint:
+        log_cuda_memory(f"before decode cache_len={cache_len}")
+        reset_cuda_peak_memory()
     out = model(
         input_ids=next_token,
         past_key_values=cache,
         use_cache=True,
         output_hidden_states=True,
     )
+    if log_checkpoint:
+        log_cuda_memory(f"after decode cache_len={cache.get_seq_length()}")
     stats.add_forward(1)
     return out, out.logits[0, -1].float()
 
@@ -150,12 +162,17 @@ def _inject_hint(
         return None
 
     hint_tensor = torch.tensor([hint_ids], device=model.device)
+    log_cuda_memory(
+        f"before hint injection cache_len={cache.get_seq_length()} hint_len={len(hint_ids)}"
+    )
+    reset_cuda_peak_memory()
     out = model(
         input_ids=hint_tensor,
         past_key_values=cache,
         use_cache=True,
         output_hidden_states=True,
     )
+    log_cuda_memory(f"after hint injection cache_len={cache.get_seq_length()}")
     stats.add_forward(len(hint_ids))
 
     hidden_size = out.hidden_states[capture_layer].shape[-1]
@@ -190,12 +207,15 @@ def _resume_after_rollback(
     else:
         last_token = input_ids[:, -1:]
 
+    log_cuda_memory(f"before rollback resume cache_len={cache.get_seq_length()}")
+    reset_cuda_peak_memory()
     out = model(
         input_ids=last_token,
         past_key_values=cache,
         use_cache=True,
         output_hidden_states=True,
     )
+    log_cuda_memory(f"after rollback resume cache_len={cache.get_seq_length()}")
     stats.add_forward(1)
     state.seg_start_tok = state.token_count
     state.seg_start_char = len(state.text)

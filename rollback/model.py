@@ -2,6 +2,7 @@ import os
 from typing import Any
 
 import torch
+from memory_debug import log_cuda_memory
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
@@ -16,18 +17,20 @@ def load_model_runtime(
     huggingface_cache = os.path.join(os.environ["HF_HOME"], "hub")
 
     device_request = device_request.lower()
-    if device_request not in {"auto", "cpu", "cuda"}:
-        raise ValueError("GEOMETRIC_CANARIES_DEVICE must be one of: auto, cpu, cuda")
+    if device_request not in {"auto", "balanced", "cpu", "cuda"}:
+        raise ValueError(
+            "GEOMETRIC_CANARIES_DEVICE must be one of: auto, balanced, cpu, cuda"
+        )
 
     cuda_available = torch.cuda.is_available()
-    if device_request == "cuda" and not cuda_available:
+    if device_request in {"balanced", "cuda"} and not cuda_available:
         raise RuntimeError(
             "CUDA was requested but is unavailable. Check nvidia-smi and the "
             "installed PyTorch CUDA build."
         )
     device_map = (
-        "cuda"
-        if device_request == "cuda"
+        device_request
+        if device_request in {"balanced", "cuda"}
         else ("auto" if device_request == "auto" and cuda_available else "cpu")
     )
     use_cuda = device_map != "cpu"
@@ -60,7 +63,7 @@ def load_model_runtime(
         "AI-MO/Kimina-Prover-RL-1.7B",
         "XiaomiMiMo/MiMo-7B-RL",
         "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-        "Goedel-LM/Goedel-Prover-V2-32",
+        "Goedel-LM/Goedel-Prover-V2-32B",
     }
     if not dry_run and model_id not in allowed_model_ids:
         raise ValueError(
@@ -88,12 +91,13 @@ def load_model_runtime(
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             quantization_config=bnb,
-            device_map=device_map,
             dtype=model_dtype,
+            device_map=device_map,
             cache_dir=huggingface_cache,
             trust_remote_code=trust_remote_code,
         )
     model.eval()
+    log_cuda_memory("model loaded")
     tokenizer = AutoTokenizer.from_pretrained(
         model_id,
         cache_dir=huggingface_cache,
