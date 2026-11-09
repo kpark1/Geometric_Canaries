@@ -301,6 +301,11 @@ def main() -> None:
         help="type model ids w/ format: organization/model-id e.g. deepseek-ai/DeepSeek-Prover-V2-7B",
     )
     parser.add_argument(
+        "--offload-kv-cache",
+        action="store_true",
+        help="store the growing KV cache on CPU to reduce GPU memory usage",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="show detailed generation and rollback state",
@@ -356,6 +361,7 @@ def main() -> None:
         model=model,
         tokenizer=tokenizer,
         capture_layer=capture_layer,
+        offload_kv_cache=args.offload_kv_cache,
     )
     if args.single_example:
         challenges = [MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]]

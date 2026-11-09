@@ -104,6 +104,15 @@ def _abandoned_token_count(mode: str, abandoned: list[dict[str, Any]]) -> int:
     return sum(len(branch["ids"]) for branch in abandoned)
 
 
+def _new_cache(model: Any, offload_kv_cache: bool) -> DynamicCache:
+    """Create a rollback-compatible cache, optionally offloaded to CPU."""
+    return DynamicCache(
+        config=model.config,
+        offloading=offload_kv_cache,
+        offload_only_non_sliding=True,
+    )
+
+
 def _advance_model(
     model: Any,
     cache: DynamicCache,
@@ -232,15 +241,19 @@ def _restart_generation(
     stats: RunStats,
     history: list[dict[str, Any]],
     segments: list[dict[str, Any]],
+    offload_kv_cache: bool,
 ) -> tuple[DynamicCache, Any, torch.Tensor]:
     """Restart generation from the prompt after a flagged segment."""
-    cache = DynamicCache()
+    cache = _new_cache(model, offload_kv_cache)
+    log_cuda_memory(f"before restart prefill prompt_len={prompt_len}")
+    reset_cuda_peak_memory()
     out = model(
         input_ids=input_ids,
         past_key_values=cache,
         use_cache=True,
         output_hidden_states=True,
     )
+    log_cuda_memory(f"after restart prefill cache_len={cache.get_seq_length()}")
     stats.add_forward(prompt_len)
     stats.n_prefills += 1
     stats.record_restart(segment)
@@ -281,6 +294,7 @@ def prove(
     inject_hint: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     messages: list[dict[str, str]] | None = None,
+    offload_kv_cache: bool = False,
 ) -> ProveRunResult:
     """One streaming generate-detect-rollback run.
 
@@ -332,13 +346,16 @@ def prove(
     ).to(model.device)
     prompt_len = input_ids.shape[1]
 
-    cache = DynamicCache()
+    cache = _new_cache(model, offload_kv_cache)
+    log_cuda_memory(f"before initial prefill prompt_len={prompt_len}")
+    reset_cuda_peak_memory()
     out = model(
         input_ids=input_ids,
         past_key_values=cache,
         use_cache=True,
         output_hidden_states=True,
     )
+    log_cuda_memory(f"after initial prefill cache_len={cache.get_seq_length()}")
     logits = out.logits[0, -1].float()
 
     state = State()
@@ -466,6 +483,7 @@ def prove(
                 stats=stats,
                 history=history,
                 segments=segments,
+                offload_kv_cache=offload_kv_cache,
             )
             continue
 
