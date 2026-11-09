@@ -42,6 +42,52 @@ HINT = (
 )
 
 
+class _LayerCapture:
+    """Keep only the selected block's final-token activation."""
+
+    def __init__(self, model: Any, capture_layer: int) -> None:
+        layer_stacks = (
+            getattr(getattr(model, "model", None), "layers", None),
+            getattr(getattr(model, "transformer", None), "h", None),
+            getattr(getattr(model, "gpt_neox", None), "layers", None),
+        )
+        layers = next((stack for stack in layer_stacks if stack is not None), None)
+        if layers is None:
+            raise TypeError("Could not locate the model's transformer layers")
+
+        # output_hidden_states[0] is the embedding output, so index N corresponds
+        # to the output of transformer block N - 1.
+        block_index = capture_layer - 1
+        if not 0 <= block_index < len(layers):
+            raise ValueError(
+                f"capture_layer={capture_layer} is outside 1..{len(layers)}"
+            )
+
+        self._last: torch.Tensor | None = None
+        self._handle = layers[block_index].register_forward_hook(self._capture)
+
+    def _capture(self, _module: Any, _inputs: Any, output: Any) -> None:
+        hidden = output[0] if isinstance(output, tuple) else output
+        # Do not retain the full prompt or sequence activation. Only the vector
+        # used by the canary survives after this layer returns.
+        self._last = hidden[:, -1, :].detach()
+
+    @property
+    def hidden_size(self) -> int:
+        if self._last is None:
+            raise RuntimeError("The capture hook did not receive an activation")
+        return self._last.shape[-1]
+
+    def numpy(self) -> np.ndarray:
+        if self._last is None:
+            raise RuntimeError("The capture hook did not receive an activation")
+        return self._last[0].float().cpu().numpy()
+
+    def close(self) -> None:
+        self._handle.remove()
+        self._last = None
+
+
 def _sample(
     logits: torch.Tensor,
     temperature: float,
@@ -130,7 +176,7 @@ def _advance_model(
         input_ids=next_token,
         past_key_values=cache,
         use_cache=True,
-        output_hidden_states=True,
+        output_hidden_states=False,
     )
     if log_checkpoint:
         log_cuda_memory(f"after decode cache_len={cache.get_seq_length()}")
@@ -160,7 +206,7 @@ def _inject_hint(
     cache: DynamicCache,
     state: State,
     stats: RunStats,
-    capture_layer: int,
+    hidden_capture: _LayerCapture,
 ) -> tuple[Any, torch.Tensor] | None:
     """Inject the rollback hint and return the next-token logits."""
     hint_ids = tokenizer(
@@ -179,12 +225,12 @@ def _inject_hint(
         input_ids=hint_tensor,
         past_key_values=cache,
         use_cache=True,
-        output_hidden_states=True,
+        output_hidden_states=False,
     )
     log_cuda_memory(f"after hint injection cache_len={cache.get_seq_length()}")
     stats.add_forward(len(hint_ids))
 
-    hidden_size = out.hidden_states[capture_layer].shape[-1]
+    hidden_size = hidden_capture.hidden_size
     for hint_token_id in hint_ids:
         hint_hidden = np.full(hidden_size, np.nan, dtype=np.float32)
         state.add_token(
@@ -222,7 +268,7 @@ def _resume_after_rollback(
         input_ids=last_token,
         past_key_values=cache,
         use_cache=True,
-        output_hidden_states=True,
+        output_hidden_states=False,
     )
     log_cuda_memory(f"after rollback resume cache_len={cache.get_seq_length()}")
     stats.add_forward(1)
@@ -251,7 +297,7 @@ def _restart_generation(
         input_ids=input_ids,
         past_key_values=cache,
         use_cache=True,
-        output_hidden_states=True,
+        output_hidden_states=False,
     )
     log_cuda_memory(f"after restart prefill cache_len={cache.get_seq_length()}")
     stats.add_forward(prompt_len)
@@ -336,6 +382,7 @@ def prove(
                         ├── no  → accept and begin next segment
                         └── yes → roll back and regenerate
     """
+    hidden_capture = _LayerCapture(model, capture_layer)
     t0 = time.time()
     canary_name, canary_fn = resolve_canary(canary)
     gen = torch.Generator(device="cpu").manual_seed(seed)
@@ -353,7 +400,7 @@ def prove(
         input_ids=input_ids,
         past_key_values=cache,
         use_cache=True,
-        output_hidden_states=True,
+        output_hidden_states=False,
     )
     log_cuda_memory(f"after initial prefill cache_len={cache.get_seq_length()}")
     logits = out.logits[0, -1].float()
@@ -383,9 +430,7 @@ def prove(
         log_step_start(state)
 
         tok = _sample(logits.cpu(), temperature, top_p, gen)
-        predictive_hidden = (
-            out.hidden_states[capture_layer][0, -1].float().cpu().numpy()
-        )
+        predictive_hidden = hidden_capture.numpy()
         token = Token(
             token_id=tok,
             logits=logits,
@@ -457,7 +502,7 @@ def prove(
                     cache=cache,
                     state=state,
                     stats=stats,
-                    capture_layer=capture_layer,
+                    hidden_capture=hidden_capture,
                 )
                 if hint_result is not None:
                     out, logits = hint_result
@@ -507,7 +552,7 @@ def prove(
 
     log_final_state(state, entropy, logprob, hidden, segments, stats)
 
-    return {
+    result: ProveRunResult = {
         "mode": mode,
         "canary": canary_name,
         "prompt": prompt,
@@ -527,6 +572,8 @@ def prove(
         "wall_s": time.time() - t0,
         "lean_status": lean_status,
     }
+    hidden_capture.close()
+    return result
 
 
 # TODO: check if the original prompt text is present and unmodified
