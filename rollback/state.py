@@ -133,3 +133,39 @@ class RunStats:
     def add_forward(self, positions: int) -> None:
         """Add processed token positions to the forward-pass accounting."""
         self.n_forward += positions
+
+    def record_abandoned_branch(
+        self,
+        segment: dict[str, Any],
+        state: State,
+    ) -> None:
+        """Save the generated branch discarded by an intervention."""
+        self.abandoned.append(
+            {
+                "segment_start_tok": segment["tok_start"],
+                "segment_end_tok": segment["tok_end"],
+                "text": state.text,
+                "ids": list(state.ids),
+                "entropy": [token.entropy for token in state.tokens],
+                "logprob": [token.logprob for token in state.tokens],
+            }
+        )
+
+    def record_rollback(self, segment: dict[str, Any]) -> None:
+        """Record a rollback to the start of a flagged segment."""
+        self.events.append(
+            {
+                "type": "rollback",
+                "to_tok": segment["tok_start"],
+                "score": segment["score"],
+            }
+        )
+
+    def record_restart(self, segment: dict[str, Any]) -> None:
+        """Record a restart caused by a flagged segment."""
+        self.events.append(
+            {
+                "type": "restart",
+                "score": segment["score"],
+            }
+        )

@@ -9,6 +9,7 @@ def load_model_runtime(
     project_cache: str,
     dry_run: bool = True,
     device_request: str = "auto",
+    model_id: str = "",
 ) -> tuple[Any, Any, int]:
     os.environ.setdefault("HF_HOME", os.path.join(project_cache, "huggingface"))
     os.environ["MPLCONFIGDIR"] = os.path.join(project_cache, "matplotlib")
@@ -47,16 +48,37 @@ def load_model_runtime(
         properties = torch.cuda.get_device_properties(0)
         print(f"GPU: {properties.name}, {properties.total_memory / 1e9:.1f} GB")
 
+    if not model_id:
+        model_id = (
+            "Qwen/Qwen2.5-0.5B-Instruct"
+            if dry_run
+            else "deepseek-ai/DeepSeek-Prover-V2-7B"
+        )
+
+    allowed_model_ids = {
+        "deepseek-ai/DeepSeek-Prover-V2-7B",
+        "AI-MO/Kimina-Prover-RL-1.7B",
+        "XiaomiMiMo/MiMo-7B-RL",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "Goedel-LM/Goedel-Prover-V2-32",
+    }
+    if not dry_run and model_id not in allowed_model_ids:
+        raise ValueError(
+            f"Unsupported model: {model_id}. "
+            f"Choose one of: {sorted(allowed_model_ids)}"
+        )
+
+    trust_remote_code = model_id == "XiaomiMiMo/MiMo-7B-RL"
+
     if dry_run:
-        model_id = "Qwen/Qwen2.5-0.5B-Instruct"
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
             dtype=model_dtype,
             device_map=device_map,
             cache_dir=huggingface_cache,
+            trust_remote_code=trust_remote_code,
         )
     else:
-        model_id = "deepseek-ai/DeepSeek-Prover-V2-7B"
         bnb = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=model_dtype,
@@ -69,9 +91,14 @@ def load_model_runtime(
             device_map=device_map,
             dtype=model_dtype,
             cache_dir=huggingface_cache,
+            trust_remote_code=trust_remote_code,
         )
     model.eval()
-    tokenizer = AutoTokenizer.from_pretrained(model_id, cache_dir=huggingface_cache)
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_id,
+        cache_dir=huggingface_cache,
+        trust_remote_code=trust_remote_code,
+    )
 
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token

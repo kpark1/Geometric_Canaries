@@ -40,14 +40,15 @@ from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
-from agent import agent_prove
-from detect import CANARIES
 from draw import plot_timeline
 from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback_types import NO_PROOF_FOUND, Challenge, LeanStatus, ProveRunResult
-from verina import build_prompt, load_verina_challenges
+from rollback_rust import LEAN_MODELS, build_prompt
+from rollback_types import NO_PROOF_FOUND, LeanStatus
+
+# New Verina challenge pipeline:
+# from verina import build_prompt, load_verina_challenges
 
 PROJECT_CACHE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".cache"
@@ -55,8 +56,29 @@ PROJECT_CACHE = os.path.join(
 # DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 FILEDIR = Path(__file__).parent / "log"
-SINGLE_EXAMPLE_INDEX = 2
-DEFAULT_LIMIT = 5
+SINGLE_EXAMPLE_INDEX = 1
+
+# Legacy paired-data pipeline retained for simpler, quick tests.
+MINIMAL_PAIRS = []
+for name, model in LEAN_MODELS.items():
+    MINIMAL_PAIRS.append(
+        {
+            "id": name,
+            "bug_type": model["bug_type"],
+            "provenance": "mutation",
+            "real_world_analogue": model["real_world_analogue"],
+            "fixed": {
+                "defn": model["fixed_defn"],
+                "spec": model["spec"],
+                "provable": True,
+            },
+            "buggy": {
+                "defn": model["buggy_defn"],
+                "spec": model["spec"],
+                "provable": False,
+            },
+        }
+    )
 
 """## Segmentation and the bad-logic detector
 
@@ -122,30 +144,6 @@ def stop_reason_label(stop_reason: str) -> str:
     return labels.get(stop_reason, str(stop_reason))
 
 
-def show_single_result(
-    res: ProveRunResult,
-    challenge: Challenge,
-) -> None:
-    """Print and plot one generated proof result."""
-    print(
-        f"\nmode={res['mode']}  rollbacks={res['rollbacks']}  "
-        f"segments={len(res['segments'])}"
-    )
-    print(
-        f"forward passes: {res['n_forward']}  "
-        f"(prefills: {res['n_prefills']})  wall: {res['wall_s']:.1f}s"
-    )
-    print(f"stopped: {stop_reason_label(res.get('stop_reason', 'unknown'))}")
-    for event in res["events"]:
-        print("  event:", event)
-    print("\noutcome:", res["lean_status"])
-    if res.get("prompt") is not None:
-        print("\n--- prompt ---\n", res["prompt"])
-    print("\n--- final text ---\n", res["text"])
-    print("-" * 50)
-    plot_timeline(res, title=f"{challenge['id']} / rollback")
-
-
 def show_run_generations(df: pd.DataFrame) -> None:
     """Print the prompt, events, and generated text for every evaluation run."""
     if "text" not in df.columns:
@@ -157,7 +155,8 @@ def show_run_generations(df: pd.DataFrame) -> None:
     print("=" * 50)
     for _, row in df.iterrows():
         print(
-            f"\n=== {row['id']} / {row['buggy']} / {row['mode']} seed={row['seed']} ==="
+            f"\n=== {row['id']} / {row['variant']} / {row['mode']} "
+            f"seed={row['seed']} ==="
         )
         print(
             f"outcome={row['outcome']}  interventions={row['interventions']}  "
@@ -176,12 +175,25 @@ def show_run_generations(df: pd.DataFrame) -> None:
 
 
 def show_eval_result(df: pd.DataFrame) -> None:
-    """Print summary tables, then each run's events and final text."""
+    """Display either one proof run or a multi-run evaluation."""
+    if len(df) == 1:
+        row = df.iloc[0]
+        show_run_generations(df)
+        result = row.get("raw_result")
+        if result is not None:
+            plot_timeline(
+                result,
+                title=f"{row['id']} / {row['variant']} / {row['mode']}",
+            )
+        return
+
     # Keep the comparison table readable when text/prompt are present.
-    summary_cols = [c for c in df.columns if c not in ("text", "prompt", "events")]
+    summary_cols = [
+        c for c in df.columns if c not in ("text", "prompt", "events", "raw_result")
+    ]
     print(df[summary_cols].to_string(index=False))
-    print("\nOutcome by bugginess x mode:")
-    outcome_table = pd.crosstab([df.buggy, df["mode"]], df.outcome).reindex(
+    print("\nOutcome by variant x mode:")
+    outcome_table = pd.crosstab([df.variant, df["mode"]], df.outcome).reindex(
         columns=[member.value for member in LeanStatus] + [NO_PROOF_FOUND],
         fill_value=0,
     )
@@ -198,9 +210,11 @@ def show_eval_result(df: pd.DataFrame) -> None:
         )
         .round(1)
     )
-    comp["saved_vs_restart_fw"] = (
-        comp.loc["restart", "fw_passes"] - comp["fw_passes"]
-    ).round(0)
+    # A single-example run contains only rollback, so it has no restart baseline.
+    if "restart" in comp.index:
+        comp["saved_vs_restart_fw"] = (
+            comp.loc["restart", "fw_passes"] - comp["fw_passes"]
+        ).round(0)
     print(comp)
 
     show_run_generations(df)
@@ -276,27 +290,15 @@ def main() -> None:
         help="generation limit per attempt (default: 2048)",
     )
     parser.add_argument(
-        "--canary",
-        choices=sorted(CANARIES),
-        default="smell",
-        help="signal used to score segments for intervention (default: smell)",
-    )
-    parser.add_argument(
-        "--agentic",
-        action="store_true",
-        help="use a tool-enabled agent (multi-turn, checked via Lean) instead "
-        "of a single-attempt no-tools generation",
-    )
-    parser.add_argument(
-        "--max-turns",
-        type=int,
-        default=3,
-        help="turn budget for --agentic (default: 3); ignored otherwise",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="use the small model for a quick run",
+    )
+    parser.add_argument(
+        "--model-id",
+        type=str,
+        default="",
+        help="type model ids w/ format: organization/model-id e.g. deepseek-ai/DeepSeek-Prover-V2-7B",
     )
     parser.add_argument(
         "--debug",
@@ -310,15 +312,6 @@ def main() -> None:
             "load log/result_<TIMESTAMP>.pkl instead of running (e.g. 20260803_221329)"
         ),
     )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=DEFAULT_LIMIT,
-        help=(
-            f"number of Verina examples to load (default: {DEFAULT_LIMIT}; "
-            "<= 0 loads all)"
-        ),
-    )
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.WARNING,
@@ -329,24 +322,21 @@ def main() -> None:
     print(f"Max new tokens: {args.max_new_tokens}")
     result_name = "single_example" if args.single_example else "full_eval"
 
-    challenges = load_verina_challenges(limit=args.limit)
-    print(
-        f"{len(challenges)} challenges: "
-        + ", ".join(challenge["id"] for challenge in challenges)
-    )
-
     if args.single_example:
         print(f"{SINGLE_EXAMPLE_INDEX=}")
 
     if args.load_saved:
         results = load_result(FILEDIR, args.load_saved)
+        if not args.single_example and "full_eval" not in results:
+            result_name = "single_example"
         saved = results[result_name]
         result = saved["result"]
         saved_at = saved["saved_at"]
         print(f"Using cached result: {result_name=}, {saved_at=}")
         # print(f'{result=}')
-        if args.single_example:
-            show_single_result(result, challenges[SINGLE_EXAMPLE_INDEX])
+        if result_name == "single_example" and not isinstance(result, pd.DataFrame):
+            challenge = MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]
+            plot_timeline(result, title=f"{challenge['id']} / buggy / rollback")
         else:
             show_eval_result(result)
         total_time = time.perf_counter() - start_time
@@ -358,50 +348,39 @@ def main() -> None:
         PROJECT_CACHE,
         dry_run=args.dry_run,
         device_request=DEVICE_REQUEST,
+        model_id=args.model_id,
     )
 
-    if args.agentic:
-        prove = partial(
-            agent_prove,
-            model=model,
-            tokenizer=tokenizer,
-            capture_layer=capture_layer,
-            max_turns=args.max_turns,
-        )
+    prove = partial(
+        run_proof,
+        model=model,
+        tokenizer=tokenizer,
+        capture_layer=capture_layer,
+    )
+    if args.single_example:
+        challenges = [MINIMAL_PAIRS[SINGLE_EXAMPLE_INDEX]]
+        variants = ("buggy",)
+        # Match the original single-example behavior: one rollback run with seed 0.
+        modes = ("rollback",)
+        seeds = (0,)
+        thresh = 1.8
     else:
-        prove = partial(
-            run_proof,
-            model=model,
-            tokenizer=tokenizer,
-            capture_layer=capture_layer,
-        )
-    run_rollback_eval = partial(
-        run_eval,
+        challenges = MINIMAL_PAIRS
+        variants = ("fixed", "buggy")
+        modes = ("plain", "rollback", "restart")
+        seeds = (0, 1)
+        # Lowering the threshold below zero guarantees interventions.
+        thresh = -1.0
+
+    df = run_eval(
         challenges,
         build_prompt,
         prove,
-    )
-    if args.single_example:
-        challenge = challenges[SINGLE_EXAMPLE_INDEX]
-        res = prove(
-            build_prompt(challenge),
-            mode="rollback",
-            canary=args.canary,
-            max_new_tokens=args.max_new_tokens,
-            thresh=1.8,
-            seed=0,
-        )
-        save_result(FILEDIR, results, result_name, res)
-        show_single_result(res, challenge)
-        total_time = time.perf_counter() - start_time
-        print(f"{total_time=:.1f}")
-        return
-
-    # Lowering the threshold below zero guarantees interventions.
-    df = run_rollback_eval(
+        variants=variants,
+        modes=modes,
+        seeds=seeds,
         max_new_tokens=args.max_new_tokens,
-        thresh=-1.0,
-        canary=args.canary,
+        thresh=thresh,
     )
     save_result(FILEDIR, results, result_name, df)
     show_eval_result(df)
