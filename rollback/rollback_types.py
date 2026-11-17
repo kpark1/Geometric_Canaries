@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 import numpy as np
 
@@ -22,6 +22,17 @@ type ResponseLeanStatus = LeanStatus | NoProofFound
 NO_PROOF_FOUND: NoProofFound = "no proof found"
 
 
+class ComparatorStatus(StrEnum):
+    OK = "ok"
+    ERROR = "error"
+    TIMEOUT = "timeout"
+
+
+type NotRun = Literal["not run"]
+type ResponseComparatorStatus = ComparatorStatus | NotRun
+NOT_RUN: NotRun = "not run"
+
+
 class ProveRunResult(TypedDict):
     mode: str  # TODO
     canary: str
@@ -41,6 +52,7 @@ class ProveRunResult(TypedDict):
     stop_reason: StopReason
     wall_s: float
     lean_status: ResponseLeanStatus
+    comparator_status: ResponseComparatorStatus
 
 
 class AgentProveRunResult(ProveRunResult):
@@ -69,3 +81,4 @@ class Challenge(TypedDict):
     id: str
     lean_code: str
     buggy: bool
+    theorem_name: NotRequired[str]

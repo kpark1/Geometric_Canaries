@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import pandas as pd
@@ -6,8 +6,9 @@ from rollback_types import ProveRunResult
 
 
 def run_eval(
-    challenges: list[dict[str, Any]],
+    challenges: Iterable[Mapping[str, Any]],
     build_prompt_fn: Callable[..., str],
+    build_challenge_lean_fn: Callable[..., str],
     prove_fn: Callable[..., ProveRunResult],
     variants: tuple[str, ...] = ("fixed", "buggy"),
     modes: tuple[str, ...] = ("plain", "rollback", "restart"),
@@ -21,11 +22,12 @@ def run_eval(
         paired = "fixed" in challenge and "buggy" in challenge
         challenge_variants: tuple[str | None, ...] = variants if paired else (None,)
         for variant in challenge_variants:
-            prompt = (
-                build_prompt_fn(challenge, variant)
-                if variant is not None
-                else build_prompt_fn(challenge)
-            )
+            if variant is not None:
+                prompt = build_prompt_fn(challenge, variant)
+                challenge_lean = build_challenge_lean_fn(challenge, variant)
+            else:
+                prompt = build_prompt_fn(challenge)
+                challenge_lean = build_challenge_lean_fn(challenge)
             for mode in modes:
                 for seed in seeds:
                     result = prove_fn(
@@ -35,12 +37,15 @@ def run_eval(
                         max_new_tokens=max_new_tokens,
                         thresh=thresh,
                         seed=seed,
+                        challenge_lean=challenge_lean,
+                        theorem_name=challenge.get("theorem_name", ""),
                     )
                     row = {
                         "id": challenge["id"],
                         "mode": mode,
                         "seed": seed,
                         "outcome": result["lean_status"],
+                        "comparator_status": result["comparator_status"],
                         "stop_reason": result["stop_reason"],
                         "prompt": result.get("prompt", prompt),
                         "text": result["text"],

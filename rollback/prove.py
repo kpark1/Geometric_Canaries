@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn.functional as F
+from comparator import check_solution_matches_challenge
 from debug_log import (
     log_boundary_rejected,
     log_boundary_search,
@@ -27,7 +28,14 @@ from lean import (
     lean_elaborates_no_sorry,
 )
 from prompt import encode_messages, encode_prompt
-from rollback_types import ProveRunResult, ResponseLeanStatus, StopReason
+from rollback_types import (
+    NOT_RUN,
+    LeanStatus,
+    ProveRunResult,
+    ResponseComparatorStatus,
+    ResponseLeanStatus,
+    StopReason,
+)
 from state import RunStats, State, Token
 from transformers import DynamicCache
 
@@ -261,6 +269,8 @@ def prove(
     inject_hint: bool = False,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     messages: list[dict[str, str]] | None = None,
+    challenge_lean: str = "",
+    theorem_name: str = "",
 ) -> ProveRunResult:
     """One streaming generate-detect-rollback run.
 
@@ -465,7 +475,9 @@ def prove(
         else np.zeros((0, 1))
     )
 
-    lean_status = _extract_and_check_proof(state.text, timeout_s=timeout_s)
+    lean_status, comparator_status = _extract_and_check_proof(
+        state.text, challenge_lean, theorem_name, timeout_s=timeout_s
+    )
 
     log_final_state(state, entropy, logprob, hidden, segments, stats)
 
@@ -488,12 +500,25 @@ def prove(
         "stop_reason": stop_reason,
         "wall_s": time.time() - t0,
         "lean_status": lean_status,
+        "comparator_status": comparator_status,
     }
 
 
-# TODO: check if the original prompt text is present and unmodified
-def _extract_and_check_proof(text: str, timeout_s: float) -> ResponseLeanStatus:
+def _extract_and_check_proof(
+    text: str,
+    challenge_lean: str,
+    theorem_name: str,
+    timeout_s: float,
+) -> tuple[ResponseLeanStatus, ResponseComparatorStatus]:
     lean_code = extract_lean_deepseek_prover_style(text)
     if lean_code is None:
-        return "no proof found"
-    return lean_elaborates_no_sorry(lean_code, timeout_s=timeout_s)
+        return "no proof found", NOT_RUN
+    lean_status = lean_elaborates_no_sorry(lean_code, timeout_s=timeout_s)
+    if lean_status != LeanStatus.OK:
+        return lean_status, NOT_RUN
+    if not challenge_lean or not theorem_name:
+        return lean_status, NOT_RUN
+    comparator_status = check_solution_matches_challenge(
+        challenge_lean, lean_code, theorem_name, timeout_s=timeout_s
+    )
+    return lean_status, comparator_status

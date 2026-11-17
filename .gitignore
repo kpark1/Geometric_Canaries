@@ -9,6 +9,14 @@ __pycache__/
 # Lean toolchain build artifacts and vendored Mathlib source
 lean-project/.lake/
 
+# Cloned + built comparator checkout (see scripts/setup_lean.sh)
+comparator-tool/
+
+# Written per-check by rollback/comparator.py
+lean-project/Challenge.lean
+lean-project/Solution.lean
+lean-project/config.json
+
 # Local model and experiment artifacts
 .cache/
 outputs/

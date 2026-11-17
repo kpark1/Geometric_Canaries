@@ -1,8 +1,10 @@
+import re
 from pathlib import Path
 from typing import Any
 
 FIXTURE_DIR = Path(__file__).parent / "rust_fixtures"
 DSP_HEADER = "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 400000\n\n"
+THEOREM_NAME = re.compile(r"\btheorem\s+([A-Za-z0-9_'.]+)")
 
 
 def load_fixture(filename: str) -> str:
@@ -11,6 +13,12 @@ def load_fixture(filename: str) -> str:
 
 def rust_comment(name: str) -> str:
     return f"-- Aeneas-style translation of Rust `{name}`\n"
+
+
+def first_theorem_name(lean_code: str) -> str:
+    match = THEOREM_NAME.search(lean_code)
+    assert match is not None, "Lean fixture has no theorem declaration"
+    return match.group(1)
 
 
 LEAN_PREAMBLE = load_fixture("preamble.lean") + "\n"
@@ -46,13 +54,13 @@ LEAN_MODELS = {
 }
 
 
-def build_prompt(
+def build_challenge_lean(
     item: dict[str, Any],
     variant: str,
     use_mathlib_header: bool = True,
 ) -> str:
     v = item[variant]
-    code_block = (
+    return (
         (DSP_HEADER if use_mathlib_header else "")
         + LEAN_PREAMBLE
         + "\n"
@@ -60,6 +68,14 @@ def build_prompt(
         + "\n\n"
         + v["spec"]
     )
+
+
+def build_prompt(
+    item: dict[str, Any],
+    variant: str,
+    use_mathlib_header: bool = True,
+) -> str:
+    code_block = build_challenge_lean(item, variant, use_mathlib_header)
     return (
         "Complete the following Lean 4 code:\n\n```lean4\n" + code_block + "\n```\n\n"
         "Before producing the Lean 4 code to formally prove the given theorem, "
@@ -70,4 +86,3 @@ def build_prompt(
         "If the statement is false, state this explicitly and give a concrete "
         "counterexample instead of a proof."
     )
-

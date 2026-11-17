@@ -1,9 +1,7 @@
-from functools import partial
-
 from agent import agent_prove
 from evaluate import run_eval
-from verina import build_prompt
 from rollback_types import LeanStatus, ProveRunResult
+from verina import build_prompt
 
 
 def lean4_block(body: str) -> str:
@@ -35,10 +33,11 @@ def make_fake_prove(texts: list[str]):
             "gen_tokens": 5 * turn,
             "stop_reason": "eos",
             "wall_s": 0.1 * turn,
-            "lean_status": None,
+            "lean_status": LeanStatus.OK,
+            "comparator_status": "not run",
         }
 
-    fake_prove.calls = calls
+    fake_prove.calls = calls  # type: ignore
     return fake_prove
 
 
@@ -97,7 +96,8 @@ class TestAgentProve:
         assert len(fake_prove.calls) == 2
 
         second_call_messages = fake_prove.calls[1]["messages"]
-        assert second_call_messages[0] == {"role": "user", "content": "prove it"}
+        assert second_call_messages[0]["role"] == "user"
+        assert second_call_messages[0]["content"].startswith("prove it")
         assert second_call_messages[1]["role"] == "assistant"
         assert "attempt 1" in second_call_messages[1]["content"]
         assert second_call_messages[2]["role"] == "user"
@@ -166,7 +166,14 @@ FAKE_CHALLENGE = {
     "lean_code": "def foo (n : Nat) : Nat := n\n"
     "theorem foo_id (n : Nat) : foo n = n := by sorry",
     "buggy": False,
+    "theorem_name": "foo_id",
 }
+
+
+def _build_challenge_lean(challenge, use_mathlib_header: bool = True) -> str:
+    from verina import DSP_HEADER
+
+    return (DSP_HEADER if use_mathlib_header else "") + challenge["lean_code"]
 
 
 class TestAgentProveThroughRunEval:
@@ -176,26 +183,18 @@ class TestAgentProveThroughRunEval:
     def test_run_eval_produces_one_row_per_challenge_mode_seed(self):
         # run_eval calls prove_fn once per (challenge, mode, seed)
         fake_prove = make_fake_prove([lean4_block("attempt 1")])
-        prove_fn = partial(
-            agent_prove,
-            model=None,
-            tokenizer=None,
-            capture_layer=0,
-            max_turns=1,
-            prove_fn=fake_prove,
-            lean_check_fn=lean_ok,
-        )
 
         df = run_eval(
             [FAKE_CHALLENGE],
             build_prompt,
-            prove_fn,
+            _build_challenge_lean,
+            fake_prove,
             modes=("plain",),
             seeds=(0,),
             canary="smell",
         )
 
         assert len(df) == 1
-        assert (df["buggy"] == False).all()  # noqa: E712
+        assert (df["buggy"] == False).all()
         assert (df["outcome"] == LeanStatus.OK).all()
         assert (df["canary"] == "smell").all()

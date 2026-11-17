@@ -39,6 +39,7 @@ def _retry_message(lean_code: str | None, feedback: str) -> str:
         "Revise your proof and produce a corrected ```lean4 block."
     )
 
+
 MULTI_TURN_INSTRUCTIONS = (
     "\n\n"
     "Include the full proof file as the last fenced ```lean4 code block in your response. "
@@ -64,7 +65,7 @@ def agent_prove(
     seed: int = 0,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     prove_fn: Callable[..., ProveRunResult] | None = None,
-    lean_check_fn: Callable[[str, float], tuple[LeanStatus, str]] = lean_check,
+    lean_check_fn: Callable[..., tuple[LeanStatus, str]] = lean_check,
 ) -> AgentProveRunResult:
     """Give the model up to max_turns attempts, checking each via real Lean.
 
@@ -83,7 +84,9 @@ def agent_prove(
     if prove_fn is None:
         from prove import prove as prove_fn
 
-    prompt = prompt + MULTI_TURN_INSTRUCTIONS # this is somewhat hacky, but it's a fast way to get us to something approximating the results we want
+    prompt = (
+        prompt + MULTI_TURN_INSTRUCTIONS
+    )  # this is somewhat hacky, but it's a fast way to get us to something approximating the results we want
 
     t0 = time.time()
     messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]

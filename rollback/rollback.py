@@ -44,7 +44,12 @@ from draw import plot_timeline
 from evaluate import run_eval
 from model import load_model_runtime
 from prove import prove as run_proof
-from rollback_rust import LEAN_MODELS, build_prompt
+from rollback_rust import (
+    LEAN_MODELS,
+    build_challenge_lean,
+    build_prompt,
+    first_theorem_name,
+)
 from rollback_types import NO_PROOF_FOUND, LeanStatus
 
 # New Verina challenge pipeline:
@@ -56,7 +61,7 @@ PROJECT_CACHE = os.path.join(
 # DRY_RUN = os.environ.get("GEOMETRIC_CANARIES_DRY_RUN", "1") != "0"
 DEVICE_REQUEST = os.environ.get("GEOMETRIC_CANARIES_DEVICE", "auto")
 FILEDIR = Path(__file__).parent / "log"
-SINGLE_EXAMPLE_INDEX = 1
+SINGLE_EXAMPLE_INDEX = 2
 
 # Legacy paired-data pipeline retained for simpler, quick tests.
 MINIMAL_PAIRS = []
@@ -67,6 +72,7 @@ for name, model in LEAN_MODELS.items():
             "bug_type": model["bug_type"],
             "provenance": "mutation",
             "real_world_analogue": model["real_world_analogue"],
+            "theorem_name": first_theorem_name(model["spec"]),
             "fixed": {
                 "defn": model["fixed_defn"],
                 "spec": model["spec"],
@@ -375,6 +381,7 @@ def main() -> None:
     df = run_eval(
         challenges,
         build_prompt,
+        build_challenge_lean,
         prove,
         variants=variants,
         modes=modes,

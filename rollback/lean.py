@@ -2,18 +2,12 @@ import json
 import os
 import re
 import shutil
-import signal
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from rollback_types import (
-    LeanStatus,
-    ProcessResult,
-    ProcessResultOrTimeout,
-    ProcessTimeout,
-)
+from rollback_types import LeanStatus, ProcessResult, ProcessTimeout
+from subprocess_utils import run_subprocess_with_timeout
 
 LEAN_PROJECT_DIR = Path(
     os.environ.get(
@@ -41,7 +35,7 @@ def extract_lean_deepseek_prover_style(generated_text: str) -> str | None:
     return blocks[-1].strip()
 
 
-def _find_lake() -> str:
+def find_lake() -> str:
     """Locate `lake`, tolerating a PATH without elan's shims (e.g. batch jobs)."""
     on_path = shutil.which("lake")
     if on_path is not None:
@@ -56,31 +50,6 @@ def _find_lake() -> str:
         "Could not find `lake`. Run scripts/setup_lean.sh to install the Lean "
         "toolchain, or set ELAN_HOME if it lives outside ~/.elan."
     )
-
-
-def _run_lean(lake: str, source_path: Path, timeout_s: float) -> ProcessResultOrTimeout:
-    # elan resolves the toolchain by walking up from the working directory, so
-    # cwd (not lake's --dir) is what selects the pinned toolchain here.
-    process = subprocess.Popen(
-        [lake, "env", "lean", "--json", "--error=hasSorry", str(source_path)],
-        cwd=LEAN_PROJECT_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        # Own process group, so a hung elaboration can be killed as a unit; the
-        # default kills only `lake` and leaves `lean` orphaned on a core.
-        start_new_session=True,
-    )
-    try:
-        stdout, _ = process.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        process.communicate()
-        return ProcessTimeout()
-    return ProcessResult(process.returncode, stdout)
 
 
 def _parse_messages(stdout: str) -> list[dict[str, Any]]:
@@ -138,11 +107,17 @@ def lean_check(
     an agent loop that gets to retry needs to know *what* was wrong, not just
     pass/fail.
     """
-    lake = _find_lake()
+    lake = find_lake()
     with tempfile.TemporaryDirectory() as workdir:
         source_path = Path(workdir) / "GeneratedProof.lean"
         source_path.write_text(lean_code, encoding="utf-8")
-        result = _run_lean(lake, source_path, timeout_s)
+        # elan resolves the toolchain by walking up from the working directory,
+        # so cwd (not lake's --dir) is what selects the pinned toolchain here.
+        result = run_subprocess_with_timeout(
+            [lake, "env", "lean", "--json", "--error=hasSorry", str(source_path)],
+            cwd=LEAN_PROJECT_DIR,
+            timeout_s=timeout_s,
+        )
 
     if isinstance(result, ProcessTimeout):
         return LeanStatus.TIMEOUT, f"Lean elaboration timed out after {timeout_s:.0f}s."

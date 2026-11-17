@@ -12,6 +12,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shadow rollback/lean.py.
 LEAN_DIR="$REPO_ROOT/lean-project"
 ELAN_BIN="${ELAN_HOME:-$HOME/.elan}/bin"
+# Gitignored, in-repo rather than some external cache dir, so setup works the
+# same for everyone regardless of what machine/environment they're on.
+# Hyphenated so the directory can never be imported as a Python module and
+# shadow rollback/comparator.py.
+COMPARATOR_HOME="${COMPARATOR_HOME:-$REPO_ROOT/comparator-tool}"
+COMPARATOR_BIN="$COMPARATOR_HOME/.lake/build/bin/comparator"
+LEAN4EXPORT_BIN="$COMPARATOR_HOME/.lake/packages/lean4export/.lake/build/bin/lean4export"
 
 for tool in curl git; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -102,6 +109,28 @@ if lake env lean --error=hasSorry "$scratch/SorryCheck.lean" >/dev/null 2>&1; th
     echo "error: --error=hasSorry accepted a proof containing 'sorry'." >&2
     echo "       The no-sorry gate is not working; do not trust results." >&2
     exit 1
+fi
+
+if [ -x "$COMPARATOR_BIN" ] && [ -x "$LEAN4EXPORT_BIN" ]; then
+    echo "==> comparator already built"
+else
+    if [ ! -d "$COMPARATOR_HOME" ]; then
+        echo "==> Cloning comparator"
+        git clone https://github.com/leanprover/comparator "$COMPARATOR_HOME"
+    fi
+
+    # comparator tags its releases to track Lean releases 1:1 (its own
+    # lean-toolchain at tag vX.Y.Z is pinned to exactly leanprover/lean4:vX.Y.Z).
+    comparator_tag="$(cut -d: -f2 "$LEAN_DIR/lean-toolchain")"
+    echo "==> Checking out comparator $comparator_tag (matching our Lean version)"
+    git -C "$COMPARATOR_HOME" fetch --tags --quiet origin
+    # --force: this checkout is a disposable, script-managed clone (gitignored,
+    # never user work), so a locally-modified tracked file should never block
+    # re-running setup.
+    git -C "$COMPARATOR_HOME" checkout --quiet --force "$comparator_tag"
+
+    echo "==> Building comparator and lean4export"
+    (cd "$COMPARATOR_HOME" && lake build lean4export comparator)
 fi
 
 echo
